@@ -1915,7 +1915,7 @@ def render_relationship_view():
                         st.markdown(f"**{source_desc}...**")
                         st.caption(f"ID: {source_id[:8]}...")
                         
-                        if st.button(f"View", key=f"view_src_{source_id}", use_container_width=True):
+                        if st.button(f"View", key=f"view_src_{source_id}_{id(source_task)}", use_container_width=True):
                             navigate_to('task_details', task_details_id=source_id)
                     
                     with ent_cols[1]:
@@ -1923,11 +1923,11 @@ def render_relationship_view():
                         st.markdown(f"**{target_desc}...**")
                         st.caption(f"ID: {target_id[:8]}...")
                         
-                        if st.button(f"View", key=f"view_tgt_{target_id}", use_container_width=True):
+                        if st.button(f"View", key=f"view_tgt_{target_id}_{id(target_task)}", use_container_width=True):
                             navigate_to('task_details', task_details_id=target_id)
                     
                     with ent_cols[2]:
-                        if st.button(f"Break", key=f"break_ent_{source_id}_{target_id}", use_container_width=True):
+                        if st.button(f"Break", key=f"break_ent_{source_id}_{target_id}_{id(source_task)}_{id(target_task)}", use_container_width=True):
                             result = break_entanglement(source_id, target_id)
                             if result:
                                 st.success("Entanglement broken successfully")
