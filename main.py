@@ -1897,12 +1897,12 @@ def render_relationship_view():
             task_map[task.get("id")] = task
         
         # Show existing entanglements
-        if edges:
+        if links:
             st.markdown("**Current Entanglements:**")
             
-            for edge in edges:
-                source_id = edge["source"]
-                target_id = edge["target"]
+            for link in links:
+                source_id = link["source"]
+                target_id = link["target"]
                 
                 source_task = task_map.get(source_id, {"description": "Unknown Task"})
                 target_task = task_map.get(target_id, {"description": "Unknown Task"})
