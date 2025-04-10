@@ -1784,137 +1784,108 @@ def render_relationship_view():
     """Render the task relationship visualization and management"""
     st.header("Task Relationships and Entanglements")
     
+    # Import visualization functions
+    from visualization import create_entanglement_network_visualization, create_interactive_network_data
+    
     # Get network data
     network_data = get_entanglement_network()
     
     # Get all tasks for reference
     all_tasks_data = get_all_tasks()
     
-    if not network_data or "nodes" not in network_data or "edges" not in network_data:
+    if not network_data:
         st.error("Failed to load network data")
+        # Check if using either "links" or "edges" as the key
+        if network_data and "nodes" in network_data:
+            if "links" not in network_data and "edges" not in network_data:
+                st.info("Network data is missing connections information.")
         return
     
     if not all_tasks_data or "tasks" not in all_tasks_data:
         st.error("Failed to load task data")
         return
     
+    # Ensure nodes is a list
     nodes = network_data.get("nodes", [])
-    edges = network_data.get("edges", [])
+    
+    # Check for both potential keys for connections
+    links = network_data.get("links", [])
+    if not links:
+        links = network_data.get("edges", [])
     
     # Tabs for different views
     tab1, tab2, tab3 = st.tabs(["Network Visualization", "Entanglement Management", "Auto-suggestions"])
     
     with tab1:
-        # Render network visualization
-        if nodes and edges:
-            # Create a network visualization
-            fig, ax = plt.subplots(figsize=(12, 8))
+        # Display enhanced visualization title
+        st.subheader("Quantum Task Entanglement Network")
+        
+        if not nodes:
+            st.warning("No tasks found in the system. Create some tasks to see them visualized here.")
+            return
             
-            # Compute layout
-            node_positions = {}
+        if len(nodes) == 1:
+            st.info("Only one task exists. Create more tasks and connect them to visualize the network.")
             
-            if len(nodes) <= 1:
-                # Single node or empty
-                for node in nodes:
-                    node_positions[node["id"]] = (0, 0)
+        # Generate the interactive data
+        node_data, link_data, static_viz = create_interactive_network_data(network_data)
+        
+        # Show statistics 
+        stats_cols = st.columns(3)
+        with stats_cols[0]:
+            st.metric("Total Tasks", len(nodes))
+        with stats_cols[1]:
+            st.metric("Connections", len(links))
+        with stats_cols[2]:
+            # Calculate average connections per node
+            if nodes:
+                avg_connections = len(links) / len(nodes) if len(nodes) > 0 else 0
+                st.metric("Avg. Connections", f"{avg_connections:.1f}")
+        
+        # Show visualization options
+        viz_options = st.radio("Visualization Type:", 
+                           ["Interactive Tables", "Network Graph"], 
+                           horizontal=True)
+        
+        if viz_options == "Network Graph":
+            # Show the enhanced static visualization
+            if static_viz:
+                st.image(f"data:image/png;base64,{static_viz}", use_column_width=True)
             else:
-                # Place nodes in a circle
-                num_nodes = len(nodes)
-                radius = 5
-                
-                for i, node in enumerate(nodes):
-                    angle = 2 * np.pi * i / num_nodes
-                    x = radius * np.cos(angle)
-                    y = radius * np.sin(angle)
-                    node_positions[node["id"]] = (x, y)
+                st.warning("Unable to generate network visualization.")
+        else:
+            # Show interactive tables
+            if node_data:
+                st.subheader("Task Nodes")
+                # Create sortable dataframe for nodes
+                import pandas as pd
+                node_df = pd.DataFrame(node_data)
+                st.dataframe(node_df, use_container_width=True)
             
-            # Map states to colors
+            if link_data:
+                st.subheader("Task Connections")
+                link_df = pd.DataFrame(link_data)
+                st.dataframe(link_df, use_container_width=True)
+                
+            # Display color legend
+            st.markdown("### Task State Color Legend")
+            legend_cols = st.columns(5)
+            
             state_colors = {
-                'PENDING': '#fcba03',
-                'ENTANGLED': '#0373fc',
-                'RESOLVED': '#27ae60',
-                'DEFERRED': '#95a5a6',
-                'CANCELLED': '#e74c3c'
+                'PENDING': '#fcba03',    # Yellow 
+                'ENTANGLED': '#0373fc',  # Blue
+                'RESOLVED': '#27ae60',   # Green
+                'DEFERRED': '#95a5a6',   # Gray
+                'CANCELLED': '#e74c3c'   # Red
             }
             
-            # Draw edges
-            for edge in edges:
-                source_id = edge["source"]
-                target_id = edge["target"]
-                
-                if source_id in node_positions and target_id in node_positions:
-                    source_pos = node_positions[source_id]
-                    target_pos = node_positions[target_id]
-                    
-                    ax.plot([source_pos[0], target_pos[0]], 
-                           [source_pos[1], target_pos[1]], 
-                           'k-', alpha=0.5, zorder=1)
-            
-            # Draw nodes
-            for node in nodes:
-                node_id = node["id"]
-                if node_id in node_positions:
-                    pos = node_positions[node_id]
-                    state = node.get("state", "PENDING")
-                    color = state_colors.get(state, '#7f8c8d')
-                    
-                    # Size based on priority and entropy
-                    priority = node.get("priority", 0.5)
-                    entropy = node.get("entropy", 0.5)
-                    size = 100 + (priority * 100) + (entropy * 50)
-                    
-                    # Draw node
-                    ax.scatter(pos[0], pos[1], s=size, c=color, alpha=0.8, edgecolors='black', zorder=2)
-                    
-                    # Add label
-                    ax.annotate(node.get("label", node_id[:6]), 
-                               xy=pos, xytext=(0, -10),
-                               textcoords="offset points",
-                               ha='center', va='center',
-                               fontsize=8)
-            
-            # Remove axes
-            ax.set_axis_off()
-            
-            # Set title
-            ax.set_title('Task Entanglement Network')
-            
-            # Add legend for states
-            state_patches = [plt.Line2D([0], [0], marker='o', color='w', 
-                                      markerfacecolor=color, markersize=10, label=state)
-                            for state, color in state_colors.items()]
-            ax.legend(handles=state_patches, loc='upper right')
-            
-            # Show the plot
-            st.pyplot(fig)
-            
-            # Add descriptive text
-            st.markdown("""
-            **Network Visualization Legend:**
-            - Node size indicates task priority and entropy (larger = higher priority/entropy)
-            - Node color indicates task state
-            - Lines between nodes represent task entanglements
-            """)
-            
-            # Statistics
-            st.subheader("Network Statistics")
-            stats_cols = st.columns(3)
-            
-            with stats_cols[0]:
-                st.metric("Total Nodes", len(nodes))
-            
-            with stats_cols[1]:
-                st.metric("Total Connections", len(edges))
-            
-            with stats_cols[2]:
-                # Calculate average connections per node
-                if nodes:
-                    avg_connections = len(edges) / len(nodes)
-                    st.metric("Avg. Connections", f"{avg_connections:.2f}")
-                else:
-                    st.metric("Avg. Connections", "0")
-        else:
-            st.info("No network data available for visualization. Try creating some task entanglements first.")
+            for i, (state, color) in enumerate(state_colors.items()):
+                with legend_cols[i]:
+                    st.markdown(
+                        f"<div style='background-color:{color};padding:10px;border-radius:5px;color:white;text-align:center'>"
+                        f"{state}</div>", 
+                        unsafe_allow_html=True
+                    )
     
     with tab2:
         # Entanglement management
