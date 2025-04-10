@@ -509,9 +509,10 @@ def generate_mock_response(endpoint, method, data, params):
         "message": "This is a mock response as API server is not running"
     }
 
+@st.cache_data(ttl=10, max_entries=100)
 def get_all_tasks(state=None, assignee=None, search=None, priority_min=None, priority_max=None, 
                   tags=None, sort_by="updated_at", sort_order="desc"):
-    """Get all tasks with filtering"""
+    """Get all tasks with filtering - cached for improved performance"""
     params = {
         "sort_by": sort_by,
         "sort_order": sort_order,
@@ -535,11 +536,18 @@ def get_all_tasks(state=None, assignee=None, search=None, priority_min=None, pri
     
     if tags:
         params["tags"] = tags
-        
+    
+    # Add cache key using refresh trigger to allow invalidation    
+    refresh_key = st.session_state.refresh_trigger
+    
     return api_request("/tasks/", params=params)
 
+@st.cache_data(ttl=10, max_entries=100)
 def get_task(task_id):
-    """Get a single task by ID"""
+    """Get a single task by ID - cached for improved performance"""
+    # Add cache key using refresh trigger to allow invalidation
+    refresh_key = st.session_state.refresh_trigger
+    
     return api_request(f"/tasks/{task_id}")
 
 def create_task(task_data):
@@ -574,21 +582,33 @@ def break_entanglement(task_id1, task_id2):
     """Break bidirectional entanglement between two tasks"""
     return api_request(f"/tasks/{task_id1}/break-entanglement/{task_id2}", method="POST")
 
+@st.cache_data(ttl=10, max_entries=10)
 def get_entropy_map():
-    """Get the current entropy distribution"""
+    """Get the current entropy distribution - cached for performance"""
+    # Add cache key using refresh trigger to allow invalidation
+    refresh_key = st.session_state.refresh_trigger
     return api_request("/entropy")
 
+@st.cache_data(ttl=10, max_entries=10)
 def get_entanglement_network():
-    """Get the task entanglement network"""
+    """Get the task entanglement network - cached for performance"""
+    # Add cache key using refresh trigger to allow invalidation
+    refresh_key = st.session_state.refresh_trigger
     return api_request("/network")
 
+@st.cache_data(ttl=10, max_entries=10)
 def suggest_entanglements(threshold=0.65):
-    """Get suggestions for task entanglements"""
+    """Get suggestions for task entanglements - cached for performance"""
     params = {"threshold": threshold}
+    # Add cache key using refresh trigger to allow invalidation
+    refresh_key = st.session_state.refresh_trigger
     return api_request("/suggestions/entanglements", params=params)
 
+@st.cache_data(ttl=10, max_entries=10)
 def suggest_optimization():
-    """Get suggestions for task optimization"""
+    """Get suggestions for task optimization - cached for performance"""
+    # Add cache key using refresh trigger to allow invalidation
+    refresh_key = st.session_state.refresh_trigger
     return api_request("/suggestions/optimization")
 
 def collapse_task_superposition(task_id):
@@ -599,19 +619,32 @@ def get_task_history(task_id):
     """Get a task's history"""
     return api_request(f"/tasks/{task_id}/history")
 
+@st.cache_data(ttl=30, max_entries=5)
 def get_system_snapshot():
-    """Get a snapshot of the system state"""
+    """Get a snapshot of the system state - cached for performance"""
+    # Add cache key using refresh trigger to allow invalidation
+    refresh_key = st.session_state.refresh_trigger
     return api_request("/system/snapshot")
 
 def create_system_backup():
     """Create a system backup"""
     return api_request("/system/backup", method="POST")
 
+@st.cache_data(ttl=30, max_entries=5)
 def get_embedding_statistics():
-    """Get statistics about the embedding engine"""
+    """Get statistics about the embedding engine - cached for performance"""
+    # Add cache key using refresh trigger to allow invalidation
+    refresh_key = st.session_state.refresh_trigger
     return api_request("/system/embedding-stats")
 
 # UI Components
+
+@st.cache_data(ttl=10)
+def get_system_info():
+    """Get basic system information for the header - cached for performance"""
+    # Add cache key using refresh trigger to allow invalidation
+    refresh_key = st.session_state.refresh_trigger
+    return api_request("/")
 
 def render_header():
     """Render the application header"""
@@ -623,8 +656,8 @@ def render_header():
     with col2:
         st.title("Neuromorphic Quantum-Cognitive Task System")
     
-    # System status
-    system_info = api_request("/")
+    # System status (using cached function)
+    system_info = get_system_info()
     if system_info:
         status_cols = st.columns(4)
         
