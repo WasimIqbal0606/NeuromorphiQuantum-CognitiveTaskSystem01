@@ -1,3 +1,8 @@
+
+import os
+# Set port to match deployment configuration
+PORT = 5000
+
 """
 Neuromorphic Quantum-Cognitive Task Management System UI
 A Streamlit-based interface for managing quantum-inspired tasks with advanced visualizations
