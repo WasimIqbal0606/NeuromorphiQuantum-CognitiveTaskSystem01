@@ -12,4 +12,4 @@ backgroundColor = "#0e1117"
 secondaryBackgroundColor = "#1e2229"
 textColor = "#fafafa"
 
-pip install --no-cache-dir sentence-transformers chromadb faiss-cpu
+
