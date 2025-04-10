@@ -1,0 +1,783 @@
+# Neuromorphic Quantum-Cognitive Task System
+# ==========================================
+
+# Install required dependencies
+!pip install -q langchain langchain_openai sentence-transformers chromadb faiss-cpu fastapi uvicorn pyngrok streamlit python-dotenv
+
+import os
+import json
+import uuid
+import time
+import numpy as np
+import pandas as pd
+from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta
+import threading
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import matplotlib.pyplot as plt
+
+# For embeddings and vector stores
+from sentence_transformers import SentenceTransformer
+import chromadb
+import faiss
+
+# LangChain components
+from langchain_openai import ChatOpenAI
+from langchain.agents import AgentType, initialize_agent, Tool
+from langchain.memory import ConversationBufferMemory
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
+from langchain.embeddings import HuggingFaceEmbeddings
+
+# FastAPI and Streamlit
+import streamlit as st
+from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+import uvicorn
+from pyngrok import ngrok, conf
+
+# Configure your OpenAI API key
+# Replace with your real key or use environment variables
+os.environ["OPENAI_API_KEY"] = "sk-..."  # Replace with your key
+
+# ==========================================
+# 1. Data Structures and State Management
+# ==========================================
+
+class TaskState:
+    """Quantum-inspired task states"""
+    PENDING = "PENDING"     # Superposition state
+    ENTANGLED = "ENTANGLED" # Connected to other tasks
+    RESOLVED = "RESOLVED"   # Wave function collapsed
+
+class Task:
+    """Quantum task representation with metadata"""
+    def __init__(self, description, priority=0.5, deadline=None, assignee=None):
+        self.id = str(uuid.uuid4())
+        self.description = description
+        self.state = TaskState.PENDING
+        self.priority = priority  # 0.0 to 1.0
+        self.deadline = deadline
+        self.assignee = assignee
+        self.created_at = datetime.now()
+        self.updated_at = datetime.now()
+        self.entangled_with = []  # IDs of related tasks
+        self.entropy = 1.0  # Higher means more chaotic/uncertain
+        self.embedding = None  # Will store vector representation
+        self.multiverse_paths = []  # Possible resolution paths
+
+    def to_dict(self):
+        """Convert task to dictionary representation"""
+        return {
+            "id": self.id,
+            "description": self.description,
+            "state": self.state,
+            "priority": self.priority,
+            "deadline": self.deadline.isoformat() if self.deadline else None,
+            "assignee": self.assignee,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+            "entangled_with": self.entangled_with,
+            "entropy": self.entropy,
+            "multiverse_paths": self.multiverse_paths
+        }
+
+
+class TaskMultiverse:
+    """Manages the multiverse of quantum tasks with vector embeddings"""
+    def __init__(self):
+        self.tasks = {}  # id -> Task
+        self.lock = threading.RLock()  # Thread-safe operations
+        self.initialize_embeddings()
+        self.audit_log = []  # For tracking state changes
+        
+    def initialize_embeddings(self):
+        """Initialize embeddings model and vector storage"""
+        try:
+            # Use a smaller, faster model for Colab
+            self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+            print("✅ Embedding model initialized successfully")
+            
+            # Initialize ChromaDB
+            self.chroma_client = chromadb.Client()
+            try:
+                self.task_collection = self.chroma_client.get_collection("task_metadata")
+                print("✅ Using existing Chroma collection")
+            except:
+                self.task_collection = self.chroma_client.create_collection("task_metadata")
+                print("✅ Created new Chroma collection")
+            
+            # Initialize FAISS
+            self.embedding_dim = 384  # For all-MiniLM-L6-v2
+            self.faiss_index = faiss.IndexFlatL2(self.embedding_dim)
+            self.id_to_index = {}  # Map task ID to FAISS index
+            self.next_index = 0  # Next available FAISS index
+            print("✅ FAISS index initialized")
+            
+        except Exception as e:
+            print(f"⚠️ Error initializing embeddings: {e}")
+            print("⚠️ Using simplified task management without embeddings")
+            self.embedding_model = None
+            self.task_collection = None
+            self.faiss_index = None
+    
+    def add_task(self, task):
+        """Add a new task to the multiverse with thread safety"""
+        with self.lock:
+            # Generate embedding if model is available
+            if self.embedding_model:
+                try:
+                    # Create embedding for the task
+                    task.embedding = self.embedding_model.encode(task.description)
+                    
+                    # Add to FAISS index
+                    self.faiss_index.add(np.array([task.embedding], dtype=np.float32))
+                    self.id_to_index[task.id] = self.next_index
+                    self.next_index += 1
+                    
+                    # Add to ChromaDB
+                    self.task_collection.add(
+                        documents=[task.description],
+                        metadatas=[{
+                            "priority": float(task.priority),
+                            "state": task.state,
+                            "entropy": float(task.entropy)
+                        }],
+                        ids=[task.id]
+                    )
+                except Exception as e:
+                    print(f"⚠️ Error adding task embeddings: {e}")
+            
+            # Add to the tasks dictionary regardless of embedding success
+            self.tasks[task.id] = task
+            
+            # Log the action
+            self.audit_log.append({
+                "timestamp": datetime.now().isoformat(),
+                "action": "TASK_CREATED",
+                "task_id": task.id,
+                "description": task.description[:50]
+            })
+            
+            return task
+
+    def update_task_state(self, task_id, new_state):
+        """Update a task's state with quantum semantics and thread safety"""
+        with self.lock:
+            if task_id not in self.tasks:
+                raise ValueError(f"Task {task_id} not found in multiverse")
+            
+            task = self.tasks[task_id]
+            old_state = task.state
+            task.state = new_state
+            task.updated_at = datetime.now()
+            
+            # Update in ChromaDB if available
+            if self.embedding_model and self.task_collection:
+                try:
+                    self.task_collection.update(
+                        ids=[task_id],
+                        metadatas=[{
+                            "priority": float(task.priority),
+                            "state": new_state,
+                            "entropy": float(task.entropy)
+                        }]
+                    )
+                except Exception as e:
+                    print(f"⚠️ Error updating task in ChromaDB: {e}")
+            
+            # Log the state change
+            self.audit_log.append({
+                "timestamp": datetime.now().isoformat(),
+                "action": "STATE_CHANGE",
+                "task_id": task_id,
+                "old_state": old_state,
+                "new_state": new_state
+            })
+            
+            return task
+    
+    def find_related_tasks(self, task_id, threshold=0.7, max_results=5):
+        """Find tasks related to the given task using vector similarity or fallback method"""
+        with self.lock:
+            if task_id not in self.tasks:
+                raise ValueError(f"Task {task_id} not found in multiverse")
+            
+            task = self.tasks[task_id]
+            related_task_ids = []
+            
+            # Vector similarity if embedding model is available
+            if self.embedding_model and task.embedding is not None and self.faiss_index:
+                try:
+                    # Convert embedding to correct format for FAISS search
+                    query_vector = np.array([task.embedding], dtype=np.float32)
+                    
+                    # Search for similar tasks
+                    k = min(max_results + 1, self.faiss_index.ntotal)  # +1 to account for self match
+                    if k > 0:
+                        distances, indices = self.faiss_index.search(query_vector, k)
+                        
+                        # Convert FAISS indices back to task IDs
+                        for i, idx in enumerate(indices[0]):
+                            # Look up the task ID from the index
+                            for t_id, t_idx in self.id_to_index.items():
+                                if t_idx == idx and t_id != task_id:  # Skip self
+                                    similarity = 1.0 - (distances[0][i] / 2.0)  # Convert L2 to similarity
+                                    if similarity >= threshold:
+                                        related_task_ids.append(t_id)
+                except Exception as e:
+                    print(f"⚠️ Error finding related tasks with FAISS: {e}")
+            
+            # Fallback to simple text matching if no embedding or FAISS search failed
+            if not related_task_ids:
+                task_words = set(task.description.lower().split())
+                for other_id, other_task in self.tasks.items():
+                    if other_id != task_id:  # Skip self
+                        other_words = set(other_task.description.lower().split())
+                        # Simple Jaccard similarity
+                        if task_words and other_words:
+                            similarity = len(task_words.intersection(other_words)) / len(task_words.union(other_words))
+                            if similarity >= threshold:
+                                related_task_ids.append(other_id)
+                
+                # Limit to max_results
+                related_task_ids = related_task_ids[:max_results]
+            
+            return related_task_ids
+    
+    def calculate_entropy_map(self):
+        """Calculate the entropy distribution across all tasks with thread safety"""
+        with self.lock:
+            entropy_map = {
+                "total_entropy": sum(task.entropy for task in self.tasks.values()),
+                "entropy_by_state": {
+                    TaskState.PENDING: sum(t.entropy for t in self.tasks.values() if t.state == TaskState.PENDING),
+                    TaskState.ENTANGLED: sum(t.entropy for t in self.tasks.values() if t.state == TaskState.ENTANGLED),
+                    TaskState.RESOLVED: sum(t.entropy for t in self.tasks.values() if t.state == TaskState.RESOLVED)
+                },
+                "task_entropies": {t.id: t.entropy for t in self.tasks.values()},
+                "overloaded_zones": self._identify_overloaded_zones()
+            }
+            return entropy_map
+    
+    def _identify_overloaded_zones(self):
+        """Find zones (assignees) with too many tasks or high entropy"""
+        assignee_tasks = {}
+        assignee_entropy = {}
+        
+        for task in self.tasks.values():
+            if task.assignee:
+                if task.assignee not in assignee_tasks:
+                    assignee_tasks[task.assignee] = []
+                    assignee_entropy[task.assignee] = 0
+                
+                assignee_tasks[task.assignee].append(task.id)
+                assignee_entropy[task.assignee] += task.entropy
+        
+        # Identify overloaded assignees (> 3 tasks or high total entropy)
+        overloaded = []
+        for assignee, tasks in assignee_tasks.items():
+            if len(tasks) > 3 or assignee_entropy[assignee] > 2.0:
+                overloaded.append({
+                    "assignee": assignee,
+                    "task_count": len(tasks),
+                    "total_entropy": assignee_entropy[assignee],
+                    "reason": "high_task_count" if len(tasks) > 3 else "high_entropy"
+                })
+        
+        return overloaded
+    
+    def get_state_snapshot(self):
+        """Get the current state of the task multiverse with thread safety"""
+        with self.lock:
+            return {
+                "tasks": {t_id: task.to_dict() for t_id, task in self.tasks.items()},
+                "entropy_map": self.calculate_entropy_map(),
+                "timestamp": datetime.now().isoformat(),
+                "audit_log": self.audit_log[-10:]  # Last 10 entries
+            }
+    
+    def get_audit_log(self, limit=50):
+        """Get recent audit log entries with thread safety"""
+        with self.lock:
+            # Return most recent entries first
+            return sorted(self.audit_log, key=lambda x: x["timestamp"], reverse=True)[:limit]
+
+# ==========================================
+# 2. LangChain Agent for Quantum Task Resolution
+# ==========================================
+
+class QuantumTaskAgent:
+    """Quantum-inspired task agent using LangChain"""
+    def __init__(self, task_multiverse, use_llm=True):
+        self.multiverse = task_multiverse
+        self.use_llm = use_llm
+        
+        # Initialize LLM components if enabled
+        if use_llm:
+            try:
+                self.llm = ChatOpenAI(temperature=0.2, model="gpt-3.5-turbo")
+                self.memory = ConversationBufferMemory(memory_key="chat_history")
+                self.tools = self._create_tools()
+                self.agent = self._create_agent()
+                print("✅ LangChain agent initialized successfully")
+            except Exception as e:
+                print(f"⚠️ Error initializing LangChain agent: {e}")
+                self.use_llm = False
+        
+        # For rate limiting and preventing excessive API calls
+        self.last_api_call = datetime.now() - timedelta(minutes=5)
+        self.call_lock = threading.Lock()
+    
+    def _create_tools(self):
+        """Create tools for the agent to interact with the task multiverse"""
+        return [
+            Tool(
+                name="GetTaskInfo",
+                func=lambda task_id: json.dumps(self.multiverse.tasks[task_id].to_dict() 
+                                             if task_id in self.multiverse.tasks 
+                                             else {"error": "Task not found"}),
+                description="Get information about a specific task by ID"
+            ),
+            Tool(
+                name="FindRelatedTasks",
+                func=lambda task_id: json.dumps([
+                    self.multiverse.tasks[t_id].to_dict() 
+                    for t_id in self.multiverse.find_related_tasks(task_id)
+                    if t_id in self.multiverse.tasks
+                ]),
+                description="Find tasks that are related to the given task"
+            ),
+            Tool(
+                name="UpdateTaskState",
+                func=lambda args: json.dumps(
+                    self.multiverse.update_task_state(
+                        json.loads(args)["task_id"], 
+                        json.loads(args)["new_state"]
+                    ).to_dict()
+                ),
+                description="Update a task's state. Args: {\"task_id\": \"...\", \"new_state\": \"...\"}"
+            ),
+            Tool(
+                name="GetEntropyMap",
+                func=lambda _: json.dumps(self.multiverse.calculate_entropy_map()),
+                description="Get the current entropy distribution across tasks"
+            )
+        ]
+    
+    def _create_agent(self):
+        """Create the LangChain agent with the tools"""
+        agent = initialize_agent(
+            self.tools,
+            self.llm,
+            agent=AgentType.STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION,
+            verbose=True,
+            memory=self.memory,
+            handle_parsing_errors=True
+        )
+        return agent
+    
+    def _can_make_api_call(self):
+        """Check if enough time has passed since last API call to prevent rate limiting"""
+        with self.call_lock:
+            now = datetime.now()
+            time_since_last = (now - self.last_api_call).total_seconds()
+            if time_since_last < 3.0:  # Minimum 3 seconds between calls
+                return False
+            self.last_api_call = now
+            return True
+    
+    def process_task(self, task_id):
+        """Process a task to determine optimal resolution path"""
+        if task_id not in self.multiverse.tasks:
+            raise ValueError(f"Task {task_id} not found in multiverse")
+        
+        # Get the task with thread safety
+        with self.multiverse.lock:
+            task = self.multiverse.tasks[task_id]
+        
+        # Use LLM for processing if enabled and not rate limited
+        if self.use_llm and self._can_make_api_call():
+            try:
+                # Generate prompt for the agent
+                prompt = f"""
+                Analyze the following task in the quantum multiverse:
+                Task ID: {task.id}
+                Description: {task.description}
+                Current State: {task.state}
+                Priority: {task.priority}
+                Deadline: {task.deadline}
+                Assignee: {task.assignee}
+                Entropy: {task.entropy}
+                
+                As a quantum-cognitive system:
+                1. Determine if this task should be entangled with other related tasks
+                2. Identify the optimal resolution path considering entropy minimization
+                3. Decide if the task state should change
+                4. Recommend assignee if not assigned
+                
+                Provide your analysis and take actions using the available tools.
+                """
+                
+                # Run the agent
+                result = self.agent.run(prompt)
+                
+                # Update the task with the agent's insights
+                with self.multiverse.lock:
+                    task = self.multiverse.tasks[task_id]  # Re-fetch to ensure latest state
+                    task.updated_at = datetime.now()
+                    
+                    # If no multiverse paths exist, add based on agent response
+                    if not task.multiverse_paths:
+                        task.multiverse_paths = [
+                            {"path": "Path generated by Quantum Agent", "probability": 0.8, "entropy_change": -0.3}
+                        ]
+                    
+                    # Reduce entropy as the agent processes the task
+                    task.entropy = max(0.1, task.entropy - 0.2)
+                
+                return {
+                    "task": task.to_dict(),
+                    "agent_response": result,
+                    "used_llm": True
+                }
+                
+            except Exception as e:
+                print(f"⚠️ Error using LLM to process task: {e}")
+                # Fall back to rule-based processing
+        
+        # Rule-based processing (fallback or if LLM disabled)
+        try:
+            # Find related tasks
+            related_task_ids = self.multiverse.find_related_tasks(task_id)
+            
+            # Apply rules based on task state and relations
+            with self.multiverse.lock:
+                task = self.multiverse.tasks[task_id]  # Re-fetch to ensure latest state
+                
+                if task.state == TaskState.PENDING and related_task_ids:
+                    # Update to ENTANGLED if related tasks exist
+                    task.state = TaskState.ENTANGLED
+                    task.entangled_with = related_task_ids
+                    
+                    # Update related tasks to be entangled with this one
+                    for related_id in related_task_ids:
+                        if related_id in self.multiverse.tasks:
+                            related_task = self.multiverse.tasks[related_id]
+                            if task_id not in related_task.entangled_with:
+                                related_task.entangled_with.append(task_id)
+                            if related_task.state == TaskState.PENDING:
+                                related_task.state = TaskState.ENTANGLED
+                
+                # Reduce entropy as the task is processed
+                task.entropy = max(0.1, task.entropy - 0.15)
+                
+                # Add a resolution path if none exists
+                if not task.multiverse_paths:
+                    task.multiverse_paths = [
+                        {
+                            "path": "Standard rule-based resolution",
+                            "probability": 0.7,
+                            "entropy_change": -0.3
+                        }
+                    ]
+                
+                # Record changes to audit log
+                if related_task_ids:
+                    self.multiverse.audit_log.append({
+                        "timestamp": datetime.now().isoformat(),
+                        "action": "TASKS_ENTANGLED",
+                        "task_id": task_id,
+                        "related_tasks": related_task_ids
+                    })
+            
+            return {
+                "task": task.to_dict(),
+                "agent_response": f"Task processed using rule-based approach. Found {len(related_task_ids)} related tasks.",
+                "used_llm": False,
+                "related_tasks": related_task_ids
+            }
+            
+        except Exception as e:
+            print(f"⚠️ Error in rule-based task processing: {e}")
+            raise
+
+# ==========================================
+# 3. FastAPI Models and Endpoints
+# ==========================================
+
+# Pydantic models for API requests and responses
+class TaskRequest(BaseModel):
+    description: str
+    priority: float = 0.5
+    deadline: Optional[str] = None
+    assignee: Optional[str] = None
+
+class TaskResponse(BaseModel):
+    message: str
+    task: dict
+
+class StateResponse(BaseModel):
+    tasks: dict
+    entropy_map: dict
+    timestamp: str
+
+# FastAPI app
+app = FastAPI(
+    title="Quantum Task Multiverse API",
+    description="API for quantum-inspired task delegation and workload balancing",
+    version="1.0.0"
+)
+
+# Global instances (to be initialized in startup)
+task_multiverse = None
+agent = None
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize components on FastAPI startup"""
+    global task_multiverse, agent
+    
+    # Initialize the multiverse and agent
+    if task_multiverse is None:
+        task_multiverse = TaskMultiverse()
+        print("✅ TaskMultiverse initialized")
+    
+    if agent is None:
+        # Try to use LLM, but fall back to rule-based if needed
+        agent = QuantumTaskAgent(task_multiverse, use_llm=True)
+        print("✅ QuantumTaskAgent initialized")
+    
+    # Create some example tasks if multiverse is empty
+    if not task_multiverse.tasks:
+        print("➕ Adding example tasks...")
+        task1 = Task("Implement user authentication for the dashboard", priority=0.8)
+        task2 = Task("Design database schema for user profiles", priority=0.7)
+        task3 = Task("Create API documentation", priority=0.5)
+        
+        task_multiverse.add_task(task1)
+        task_multiverse.add_task(task2)
+        task_multiverse.add_task(task3)
+        
+        # Entangle related tasks
+        task1.entangled_with.append(task2.id)
+        task2.entangled_with.append(task1.id)
+        task_multiverse.update_task_state(task1.id, TaskState.ENTANGLED)
+        task_multiverse.update_task_state(task2.id, TaskState.ENTANGLED)
+        
+        # Create some resolved tasks
+        task4 = Task("Set up project repositories", priority=0.9)
+        task_multiverse.add_task(task4)
+        task_multiverse.update_task_state(task4.id, TaskState.RESOLVED)
+        
+        print("✅ Example tasks added")
+
+# API endpoints
+@app.post("/new_task", response_model=TaskResponse)
+async def create_new_task(task_req: TaskRequest, background_tasks: BackgroundTasks):
+    """Create a new task in the multiverse"""
+    # Parse deadline if provided
+    deadline = None
+    if task_req.deadline:
+        try:
+            deadline = datetime.fromisoformat(task_req.deadline)
+        except Exception:
+            # If parsing fails, keep deadline as None
+            pass
+    
+    # Create and add task
+    task = Task(
+        description=task_req.description,
+        priority=task_req.priority,
+        deadline=deadline,
+        assignee=task_req.assignee
+    )
+    task_multiverse.add_task(task)
+    
+    # Process with agent in background
+    background_tasks.add_task(agent.process_task, task.id)
+    
+    return {
+        "message": "Task created and being processed",
+        "task": task.to_dict()
+    }
+
+@app.get("/get_state", response_model=dict)
+async def get_current_state():
+    """Get the current state of the task multiverse"""
+    return task_multiverse.get_state_snapshot()
+
+@app.get("/entropy_map", response_model=dict)
+async def get_entropy_map():
+    """Get the entropy distribution map"""
+    return task_multiverse.calculate_entropy_map()
+
+@app.get("/task/{task_id}", response_model=dict)
+async def get_task(task_id: str):
+    """Get a specific task by ID"""
+    if task_id not in task_multiverse.tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task_multiverse.tasks[task_id].to_dict()
+
+@app.post("/process_task/{task_id}", response_model=dict)
+async def process_task(task_id: str):
+    """Manually trigger agent processing for a task"""
+    if task_id not in task_multiverse.tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    try:
+        result = agent.process_task(task_id)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing task: {str(e)}")
+
+@app.post("/update_task_state/{task_id}", response_model=dict)
+async def update_task_state(task_id: str, new_state: str):
+    """Update a task's state"""
+    if task_id not in task_multiverse.tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    if new_state not in [TaskState.PENDING, TaskState.ENTANGLED, TaskState.RESOLVED]:
+        raise HTTPException(status_code=400, detail="Invalid state")
+    
+    try:
+        task = task_multiverse.update_task_state(task_id, new_state)
+        return task.to_dict()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating task: {str(e)}")
+
+@app.get("/audit_log", response_model=List[dict])
+async def get_audit_log(limit: int = 50):
+    """Get the system audit log"""
+    return task_multiverse.get_audit_log(limit)
+
+# ==========================================
+# 4. Background Tasks and Maintenance
+# ==========================================
+
+class BackgroundMaintenance:
+    """Background tasks for entropy adjustment and system maintenance"""
+    def __init__(self, task_multiverse, interval_seconds=30):
+        self.multiverse = task_multiverse
+        self.interval = interval_seconds
+        self.running = False
+        self.thread = None
+    
+    def start(self):
+        """Start the background maintenance thread"""
+        if self.thread and self.thread.is_alive():
+            return  # Already running
+        
+        self.running = True
+        self.thread = threading.Thread(target=self._run_maintenance_loop)
+        self.thread.daemon = True  # Allow the thread to exit when main program exits
+        self.thread.start()
+        print("✅ Background maintenance started")
+    
+    def stop(self):
+        """Stop the background maintenance thread"""
+        self.running = False
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=5)  # Wait for thread to end
+        print("🛑 Background maintenance stopped")
+    
+    def _run_maintenance_loop(self):
+        """Main maintenance loop"""
+        while self.running:
+            try:
+                self._perform_maintenance()
+            except Exception as e:
+                print(f"⚠️ Error in maintenance task: {e}")
+            
+            # Sleep for the specified interval
+            time.sleep(self.interval)
+    
+    def _perform_maintenance(self):
+        """Perform periodic maintenance tasks"""
+        print("[Background] Running system maintenance...")
+        
+        with self.multiverse.lock:
+            now = datetime.now()
+            
+            # Age tasks and adjust entropy
+            for task in self.multiverse.tasks.values():
+                # 1. Increase entropy for aging pending tasks
+                if task.state == TaskState.PENDING:
+                    age_hours = (now - task.created_at).total_seconds() / 3600
+                    if age_hours > 1:  # More than 1 hour old
+                        task.entropy = min(1.0, task.entropy + 0.05)
+                
+                # 2. Decrease entropy for resolved tasks over time
+                elif task.state == TaskState.RESOLVED:
+                    task.entropy = max(0.1, task.entropy - 0.01)
+                
+                # 3. Check for deadline proximity and adjust priority
+                if task.deadline and task.state != TaskState.RESOLVED:
+                    days_remaining = (task.deadline - now).total_seconds() / 86400  # days
+                    if days_remaining < 1:  # Less than a day remaining
+                        task.priority = min(1.0, task.priority + 0.1)  # Boost priority
+            
+            # Add maintenance event to audit log
+            self.multiverse.audit_log.append({
+                "timestamp": now.isoformat(),
+                "action": "SYSTEM_MAINTENANCE",
+                "details": "Entropy and priority adjustments"
+            })
+
+# ==========================================
+# 5. Streamlit Frontend
+# ==========================================
+
+def write_streamlit_app(api_url):
+    """Generate the Streamlit app code file"""
+    with open("quantum_task_app.py", "w") as f:
+        f.write(f"""
+import streamlit as st
+import requests
+import pandas as pd
+import numpy as np
+import json
+import time
+import matplotlib.pyplot as plt
+from datetime import datetime, timedelta
+import plotly.express as px
+import plotly.graph_objects as go
+
+# API URL
+API_URL = "{api_url}"
+
+# Page configuration
+st.set_page_config(
+    page_title="Quantum Task Multiverse",
+    page_icon="🧠",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS
+st.markdown('''
+<style>
+    .main-header {{
+        color: #7E57C2;
+        font-size: 2.5rem;
+        margin-bottom: 1rem;
+    }}
+    .subheader {{
+        color: #5E35B1;
+        font-size: 1.8rem;
+        margin-top: 1rem;
+    }}
+    .card {{
+        background-color: #f8f9fa;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin-bottom: 1rem;
+        border-left: 4px solid #7E57C2;
+    }}
+    .state-pending {{
+        color: #FF9800;
+        font-weight: bold;
+    }}
+    .state-entangled {{
+        color: #2196
