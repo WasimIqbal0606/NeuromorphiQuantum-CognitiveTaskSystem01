@@ -19,6 +19,7 @@ import io
 import threading
 import random
 from PIL import Image
+import functools
 
 # Configure page
 st.set_page_config(
