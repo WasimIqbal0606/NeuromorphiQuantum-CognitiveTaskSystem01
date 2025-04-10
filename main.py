@@ -12,6 +12,7 @@ st.set_page_config(
 import os
 # Set port to match deployment configuration
 PORT = 5000
+HEALTH_PORT = PORT
 
 """
 Neuromorphic Quantum-Cognitive Task Management System UI
