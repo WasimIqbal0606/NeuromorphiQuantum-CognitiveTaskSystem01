@@ -2,11 +2,6 @@ print("✅ Starting Streamlit app")
 
 import streamlit as st
 import os
-
-# Set Streamlit server configuration
-os.environ['STREAMLIT_SERVER_PORT'] = '5000'
-os.environ['STREAMLIT_SERVER_ADDRESS'] = '0.0.0.0'
-
 # Configure page must be the first streamlit command
 st.set_page_config(
     page_title="Quantum Task Manager",
@@ -17,7 +12,7 @@ st.set_page_config(
 
 import os
 # Set port to match deployment configuration
-PORT = 5000
+PORT = 8501
 HEALTH_PORT = PORT
 
 """
