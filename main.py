@@ -1,3 +1,4 @@
+print("✅ Starting Streamlit app")
 
 import streamlit as st
 import os
