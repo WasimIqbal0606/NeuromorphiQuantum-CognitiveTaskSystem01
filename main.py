@@ -1900,7 +1900,8 @@ def render_relationship_view():
         if links:
             st.markdown("**Current Entanglements:**")
             
-            for link in links:
+            # Use enumeration for unique button keys
+            for i, link in enumerate(links):
                 source_id = link["source"]
                 target_id = link["target"]
                 
@@ -1915,7 +1916,7 @@ def render_relationship_view():
                         st.markdown(f"**{source_desc}...**")
                         st.caption(f"ID: {source_id[:8]}...")
                         
-                        if st.button(f"View", key=f"view_src_{source_id}_{id(source_task)}", use_container_width=True):
+                        if st.button(f"View", key=f"view_src_{i}_{source_id}", use_container_width=True):
                             navigate_to('task_details', task_details_id=source_id)
                     
                     with ent_cols[1]:
@@ -1923,11 +1924,11 @@ def render_relationship_view():
                         st.markdown(f"**{target_desc}...**")
                         st.caption(f"ID: {target_id[:8]}...")
                         
-                        if st.button(f"View", key=f"view_tgt_{target_id}_{id(target_task)}", use_container_width=True):
+                        if st.button(f"View", key=f"view_tgt_{i}_{target_id}", use_container_width=True):
                             navigate_to('task_details', task_details_id=target_id)
                     
                     with ent_cols[2]:
-                        if st.button(f"Break", key=f"break_ent_{source_id}_{target_id}_{id(source_task)}_{id(target_task)}", use_container_width=True):
+                        if st.button(f"Break", key=f"break_ent_{i}_{source_id}_{target_id}", use_container_width=True):
                             result = break_entanglement(source_id, target_id)
                             if result:
                                 st.success("Entanglement broken successfully")
@@ -1998,18 +1999,18 @@ def render_relationship_view():
                                     st.markdown(f"**{task1_desc[:40]}...**")
                                     st.caption(f"ID: {task1_id[:8]}...")
                                     
-                                    if st.button(f"View", key=f"view_sugg1_{i}", use_container_width=True):
+                                    if st.button(f"View", key=f"view_sugg1_{i}_{task1_id}", use_container_width=True):
                                         navigate_to('task_details', task_details_id=task1_id)
                                 
                                 with sugg_cols[1]:
                                     st.markdown(f"**{task2_desc[:40]}...**")
                                     st.caption(f"ID: {task2_id[:8]}...")
                                     
-                                    if st.button(f"View", key=f"view_sugg2_{i}", use_container_width=True):
+                                    if st.button(f"View", key=f"view_sugg2_{i}_{task2_id}", use_container_width=True):
                                         navigate_to('task_details', task_details_id=task2_id)
                                 
                                 with sugg_cols[2]:
-                                    if st.button(f"Entangle", key=f"create_sugg_{i}", use_container_width=True):
+                                    if st.button(f"Entangle", key=f"create_sugg_{i}_{task1_id}_{task2_id}", use_container_width=True):
                                         result = entangle_tasks(task1_id, task2_id)
                                         if result:
                                             st.success("Entanglement created successfully")
@@ -2275,20 +2276,20 @@ def render_suggestions():
                                     st.markdown(f"**Task 1:** {task1_desc[:40]}...")
                                     st.caption(f"ID: {task1_id[:8]}...")
                                     
-                                    if st.button(f"View Task 1", key=f"view_sugg1_{i}", use_container_width=True):
+                                    if st.button(f"View Task 1", key=f"view_sugg1_rec_{i}_{task1_id}", use_container_width=True):
                                         navigate_to('task_details', task_details_id=task1_id)
                                 
                                 with sugg_cols[1]:
                                     st.markdown(f"**Task 2:** {task2_desc[:40]}...")
                                     st.caption(f"ID: {task2_id[:8]}...")
                                     
-                                    if st.button(f"View Task 2", key=f"view_sugg2_{i}", use_container_width=True):
+                                    if st.button(f"View Task 2", key=f"view_sugg2_rec_{i}_{task2_id}", use_container_width=True):
                                         navigate_to('task_details', task_details_id=task2_id)
                                 
                                 action_cols = st.columns(2)
                                 
                                 with action_cols[0]:
-                                    if st.button(f"Create Entanglement", key=f"create_sugg_{i}", use_container_width=True):
+                                    if st.button(f"Create Entanglement", key=f"create_sugg_rec_{i}_{task1_id}_{task2_id}", use_container_width=True):
                                         result = entangle_tasks(task1_id, task2_id)
                                         if result:
                                             st.success("Entanglement created successfully")
@@ -2296,7 +2297,7 @@ def render_suggestions():
                                             trigger_refresh()
                                 
                                 with action_cols[1]:
-                                    if st.button(f"Skip Suggestion", key=f"skip_sugg_{i}", use_container_width=True):
+                                    if st.button(f"Skip Suggestion", key=f"skip_sugg_{i}_{task1_id}_{task2_id}", use_container_width=True):
                                         pass
                                 
                                 st.divider()
@@ -2338,7 +2339,7 @@ def render_suggestions():
                                 action_cols = st.columns(3)
                                 
                                 with action_cols[0]:
-                                    if st.button(f"Apply Suggestion", key=f"apply_opt_{i}", use_container_width=True):
+                                    if st.button(f"Apply Suggestion", key=f"apply_opt_{i}_{task_id}", use_container_width=True):
                                         result = update_task(task_id, {
                                             "assignee": suggestion.get('suggested_assignee')
                                         })
@@ -2349,11 +2350,11 @@ def render_suggestions():
                                             trigger_refresh()
                                 
                                 with action_cols[1]:
-                                    if st.button(f"View Task", key=f"view_opt_{i}", use_container_width=True):
+                                    if st.button(f"View Task", key=f"view_opt_{i}_{task_id}", use_container_width=True):
                                         navigate_to('task_details', task_details_id=task_id)
                                 
                                 with action_cols[2]:
-                                    if st.button(f"Skip", key=f"skip_opt_{i}", use_container_width=True):
+                                    if st.button(f"Skip", key=f"skip_opt_{i}_{task_id}", use_container_width=True):
                                         pass
                                 
                                 st.divider()
