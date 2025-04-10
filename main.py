@@ -1,5 +1,10 @@
 
 import streamlit as st
+import os
+
+# Set Streamlit server configuration
+os.environ['STREAMLIT_SERVER_PORT'] = '5000'
+os.environ['STREAMLIT_SERVER_ADDRESS'] = '0.0.0.0'
 
 # Configure page must be the first streamlit command
 st.set_page_config(
