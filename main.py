@@ -29,7 +29,12 @@ st.set_page_config(
 )
 
 # API endpoint
+# For development, we need to make sure this matches where the API server is running
+# Currently, we're setting up to use a direct connection without separate API server for simplicity
 API_URL = "http://localhost:8000"
+
+# Setup flag to use mock data since API server is not running
+USE_MOCK_DATA = True
 
 # Session state initialization for page navigation
 if 'page' not in st.session_state:
@@ -147,6 +152,11 @@ def api_request(endpoint, method="GET", data=None, params=None):
     """Make an API request to the backend"""
     url = f"{API_URL}{endpoint}"
     
+    # If mock data is enabled, return simulated responses
+    if USE_MOCK_DATA:
+        return generate_mock_response(endpoint, method, data, params)
+    
+    # Else try to connect to API server
     try:
         if method == "GET":
             response = requests.get(url, params=params)
@@ -168,6 +178,335 @@ def api_request(endpoint, method="GET", data=None, params=None):
     except Exception as e:
         st.error(f"API Request Error: {e}")
         return None
+
+def generate_mock_response(endpoint, method, data, params):
+    """Generate mock responses for development when API server is not running"""
+    import uuid
+    from datetime import datetime, timedelta
+    
+    # Root endpoint
+    if endpoint == "/":
+        return {
+            "name": "Neuromorphic Quantum-Cognitive Task System",
+            "status": "operational",
+            "version": "1.0.0",
+            "task_count": 4,
+            "embedding_engine": True,
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    # Mock tasks list
+    if endpoint == "/tasks/" and method == "GET":
+        # Create some example tasks
+        mock_tasks = [
+            {
+                "id": "task1",
+                "description": "Implement quantum entanglement visualization for related tasks",
+                "priority": 0.8,
+                "deadline": (datetime.now() + timedelta(days=2)).isoformat(),
+                "assignee": "Alice",
+                "state": "PENDING",
+                "created_at": (datetime.now() - timedelta(days=5)).isoformat(),
+                "updated_at": (datetime.now() - timedelta(hours=8)).isoformat(),
+                "entangled_with": ["task2"],
+                "entropy": 0.75,
+                "tags": ["feature", "design", "urgent"],
+                "multiverse_paths": [
+                    "Use graph-based visualization with D3.js",
+                    "Implement 3D visualization with Three.js",
+                ]
+            },
+            {
+                "id": "task2",
+                "description": "Enhance neural embeddings with adaptive similarity thresholds",
+                "priority": 0.6,
+                "deadline": (datetime.now() + timedelta(days=7)).isoformat(),
+                "assignee": "Bob",
+                "state": "ENTANGLED",
+                "created_at": (datetime.now() - timedelta(days=10)).isoformat(),
+                "updated_at": (datetime.now() - timedelta(days=1)).isoformat(),
+                "entangled_with": ["task1", "task3"],
+                "entropy": 0.5,
+                "tags": ["enhancement", "research"],
+                "multiverse_paths": [
+                    "Implement adaptive threshold based on task distribution",
+                    "Use Bayesian optimization for threshold tuning"
+                ]
+            },
+            {
+                "id": "task3",
+                "description": "Fix entropy decay calculation bug in quantum core",
+                "priority": 0.9,
+                "deadline": (datetime.now() - timedelta(days=1)).isoformat(),
+                "assignee": "Charlie",
+                "state": "PENDING",
+                "created_at": (datetime.now() - timedelta(days=2)).isoformat(),
+                "updated_at": (datetime.now() - timedelta(hours=4)).isoformat(),
+                "entangled_with": ["task2"],
+                "entropy": 0.95,
+                "tags": ["bug", "urgent"],
+                "multiverse_paths": [
+                    "Recalibrate decay function parameters",
+                    "Rewrite decay algorithm using tensor operations"
+                ]
+            },
+            {
+                "id": "task4",
+                "description": "Document system architecture and quantum principles",
+                "priority": 0.4,
+                "deadline": (datetime.now() + timedelta(days=14)).isoformat(),
+                "assignee": "Diana",
+                "state": "RESOLVED",
+                "created_at": (datetime.now() - timedelta(days=20)).isoformat(),
+                "updated_at": (datetime.now() - timedelta(days=2)).isoformat(),
+                "entangled_with": [],
+                "entropy": 0.2,
+                "tags": ["documentation"],
+                "multiverse_paths": [
+                    "Create technical whitepaper",
+                    "Write user-friendly documentation"
+                ]
+            }
+        ]
+        
+        return {
+            "total": len(mock_tasks),
+            "offset": 0,
+            "limit": 100,
+            "tasks": mock_tasks
+        }
+    
+    # Create task
+    if endpoint == "/tasks/" and method == "POST":
+        task_data = data
+        new_task = {
+            "id": f"task_{uuid.uuid4().hex[:8]}",
+            "description": task_data.get("description", "New Task"),
+            "priority": task_data.get("priority", 0.5),
+            "deadline": task_data.get("deadline"),
+            "assignee": task_data.get("assignee"),
+            "state": "PENDING",
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+            "entangled_with": [],
+            "entropy": 1.0,
+            "tags": task_data.get("tags", []),
+            "multiverse_paths": ["Initial resolution path"]
+        }
+        
+        return {**new_task, "suggested_entanglements": []}
+        
+    # Get task by ID
+    if endpoint.startswith("/tasks/") and endpoint.count("/") == 2 and method == "GET":
+        task_id = endpoint.split("/")[-1]
+        
+        # Return a mock task for any ID
+        return {
+            "id": task_id,
+            "description": f"Example task {task_id}",
+            "priority": 0.7,
+            "deadline": (datetime.now() + timedelta(days=3)).isoformat(),
+            "assignee": "Alice",
+            "state": "PENDING",
+            "created_at": (datetime.now() - timedelta(days=1)).isoformat(),
+            "updated_at": datetime.now().isoformat(),
+            "entangled_with": [],
+            "entropy": 0.8,
+            "tags": ["example", "mock"],
+            "multiverse_paths": ["Path 1", "Path 2"]
+        }
+
+    # Get related tasks
+    if endpoint.endswith("/related") and method == "GET":
+        task_id = endpoint.split("/")[-2]
+        
+        return {
+            "source_task_id": task_id,
+            "threshold": params.get("threshold", 0.7),
+            "related_tasks": [
+                {
+                    "task": {
+                        "id": f"related_{uuid.uuid4().hex[:8]}",
+                        "description": "A related task with similar content",
+                        "priority": 0.6,
+                        "deadline": (datetime.now() + timedelta(days=5)).isoformat(),
+                        "assignee": "Bob",
+                        "state": "PENDING",
+                        "created_at": (datetime.now() - timedelta(days=3)).isoformat(),
+                        "updated_at": (datetime.now() - timedelta(hours=6)).isoformat(),
+                        "entangled_with": [],
+                        "entropy": 0.7,
+                        "tags": ["example", "related"],
+                        "multiverse_paths": ["Path A", "Path B"]
+                    },
+                    "similarity": 0.85
+                }
+            ]
+        }
+    
+    # Get entropy map
+    if endpoint == "/entropy":
+        return {
+            "total_entropy": 3.5,
+            "entropy_by_state": {
+                "PENDING": 2.2,
+                "ENTANGLED": 0.8,
+                "RESOLVED": 0.3,
+                "DEFERRED": 0.2,
+                "CANCELLED": 0.0
+            },
+            "task_entropies": {
+                "task1": 0.75,
+                "task2": 0.5,
+                "task3": 0.95,
+                "task4": 0.2
+            },
+            "overloaded_zones": [
+                {"assignee": "Charlie", "task_count": 3, "total_entropy": 2.1, "alert_level": "high"}
+            ],
+            "entropy_trend": [
+                {"timestamp": (datetime.now() - timedelta(days=7)).isoformat(), "total_entropy": 4.2},
+                {"timestamp": (datetime.now() - timedelta(days=6)).isoformat(), "total_entropy": 4.0},
+                {"timestamp": (datetime.now() - timedelta(days=5)).isoformat(), "total_entropy": 3.8},
+                {"timestamp": (datetime.now() - timedelta(days=4)).isoformat(), "total_entropy": 3.9},
+                {"timestamp": (datetime.now() - timedelta(days=3)).isoformat(), "total_entropy": 3.7},
+                {"timestamp": (datetime.now() - timedelta(days=2)).isoformat(), "total_entropy": 3.6},
+                {"timestamp": (datetime.now() - timedelta(days=1)).isoformat(), "total_entropy": 3.5},
+                {"timestamp": datetime.now().isoformat(), "total_entropy": 3.5}
+            ]
+        }
+    
+    # Get task entanglement network
+    if endpoint == "/network":
+        return {
+            "nodes": [
+                {"id": "task1", "label": "Task 1", "entropy": 0.75, "state": "PENDING"},
+                {"id": "task2", "label": "Task 2", "entropy": 0.5, "state": "ENTANGLED"},
+                {"id": "task3", "label": "Task 3", "entropy": 0.95, "state": "PENDING"},
+                {"id": "task4", "label": "Task 4", "entropy": 0.2, "state": "RESOLVED"}
+            ],
+            "links": [
+                {"source": "task1", "target": "task2", "similarity": 0.82, "type": "entangled"},
+                {"source": "task2", "target": "task3", "similarity": 0.68, "type": "entangled"},
+                {"source": "task1", "target": "task3", "similarity": 0.55, "type": "suggested"}
+            ]
+        }
+        
+    # Entanglement suggestions
+    if endpoint == "/suggestions/entanglements":
+        return {
+            "suggestions": [
+                {
+                    "task1": {
+                        "id": "task1",
+                        "description": "Implement quantum entanglement visualization"
+                    },
+                    "task2": {
+                        "id": "task5",
+                        "description": "Research visualization libraries for network graphs"
+                    },
+                    "similarity": 0.78,
+                    "reason": "Both tasks involve visualization technology"
+                },
+                {
+                    "task1": {
+                        "id": "task3",
+                        "description": "Fix entropy decay calculation bug"
+                    },
+                    "task2": {
+                        "id": "task6",
+                        "description": "Optimize performance of core quantum algorithms"
+                    },
+                    "similarity": 0.72,
+                    "reason": "Both involve quantum core optimizations"
+                }
+            ],
+            "threshold": params.get("threshold", 0.65),
+            "count": 2
+        }
+        
+    # Task optimization suggestions
+    if endpoint == "/suggestions/optimization":
+        return {
+            "suggestions": [
+                {
+                    "task_id": "task3",
+                    "task_description": "Fix entropy decay calculation bug in quantum core",
+                    "current_assignee": "Charlie",
+                    "suggested_assignee": "Alice",
+                    "reason": "Alice has lower workload and expertise in quantum algorithms"
+                },
+                {
+                    "task_id": "task7",
+                    "task_description": "Update embedding model to latest version",
+                    "current_assignee": "Charlie",
+                    "suggested_assignee": "Bob",
+                    "reason": "Bob has completed similar tasks successfully"
+                }
+            ],
+            "count": 2
+        }
+    
+    # Get task history
+    if endpoint.endswith("/history"):
+        task_id = endpoint.split("/")[-2]
+        
+        return {
+            "task_id": task_id,
+            "history": [
+                {
+                    "timestamp": (datetime.now() - timedelta(days=5)).isoformat(),
+                    "event_type": "CREATED",
+                    "details": {"description": f"Example task {task_id}", "priority": 0.5}
+                },
+                {
+                    "timestamp": (datetime.now() - timedelta(days=3)).isoformat(),
+                    "event_type": "UPDATED",
+                    "details": {"priority": 0.5, "priority": 0.7}
+                },
+                {
+                    "timestamp": (datetime.now() - timedelta(days=2)).isoformat(),
+                    "event_type": "STATE_CHANGED",
+                    "details": {"from": "PENDING", "to": "ENTANGLED"}
+                },
+                {
+                    "timestamp": (datetime.now() - timedelta(days=1)).isoformat(),
+                    "event_type": "ENTANGLEMENT_ADDED",
+                    "details": {"entangled_with": "task2"}
+                }
+            ]
+        }
+    
+    # System snapshot
+    if endpoint == "/system/snapshot":
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "task_count": 4,
+            "entropy_level": 3.5,
+            "embedding_engine_status": "operational",
+            "task_states": {
+                "PENDING": 2,
+                "ENTANGLED": 1,
+                "RESOLVED": 1,
+                "DEFERRED": 0, 
+                "CANCELLED": 0
+            }
+        }
+        
+    # Create system backup
+    if endpoint == "/system/backup" and method == "POST":
+        return {
+            "status": "success",
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    # Default response for unhandled endpoints
+    return {
+        "status": "mock_response",
+        "endpoint": endpoint,
+        "method": method,
+        "message": "This is a mock response as API server is not running"
+    }
 
 def get_all_tasks(state=None, assignee=None, search=None, priority_min=None, priority_max=None, 
                   tags=None, sort_by="updated_at", sort_order="desc"):
