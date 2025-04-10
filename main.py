@@ -1,4 +1,14 @@
 
+import streamlit as st
+
+# Configure page must be the first streamlit command
+st.set_page_config(
+    page_title="Quantum Task Manager",
+    page_icon="🧠",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 import os
 # Set port to match deployment configuration
 PORT = 5000
@@ -8,7 +18,6 @@ Neuromorphic Quantum-Cognitive Task Management System UI
 A Streamlit-based interface for managing quantum-inspired tasks with advanced visualizations
 """
 
-import os
 import json
 import time
 import asyncio
@@ -16,7 +25,6 @@ import base64
 import requests
 import numpy as np
 import pandas as pd
-import streamlit as st
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Union
 import matplotlib.pyplot as plt
@@ -25,14 +33,6 @@ import threading
 import random
 from PIL import Image
 import functools
-
-# Configure page
-st.set_page_config(
-    page_title="Quantum Task Manager",
-    page_icon="🧠",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # API endpoint
 # For development, we need to make sure this matches where the API server is running
