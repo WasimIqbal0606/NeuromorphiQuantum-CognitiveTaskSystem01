@@ -8,13 +8,15 @@ from typing import List, Dict, Any, Optional, Tuple
 import time
 from datetime import datetime
 
+# Wrap imports in try-except to handle unavailable dependencies
 try:
     from sentence_transformers import SentenceTransformer
     import chromadb
     import faiss
     EMBEDDING_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     EMBEDDING_AVAILABLE = False
+    IMPORT_ERROR_MESSAGE = str(e)
 
 
 class EmbeddingEngine:
@@ -25,9 +27,13 @@ class EmbeddingEngine:
         self.initialized = False
         self.model_name = model_name
         self.embedding_dim = 384  # Default for all-MiniLM-L6-v2
+        self.error_reason = None
+        self.fallback_method = "text_matching"
         
         if not EMBEDDING_AVAILABLE:
-            print("⚠️ Embedding libraries not available. Using fallback text matching.")
+            self.error_reason = f"Required libraries not available: {IMPORT_ERROR_MESSAGE}"
+            print(f"⚠️ Embedding libraries not available: {IMPORT_ERROR_MESSAGE}")
+            print("⚠️ Using fallback text matching.")
             return
         
         try:
@@ -40,7 +46,8 @@ class EmbeddingEngine:
             try:
                 self.task_collection = self.chroma_client.get_collection("task_metadata")
                 print("✅ Using existing Chroma collection")
-            except:
+            except Exception as ce:
+                print(f"Info: {ce}")
                 self.task_collection = self.chroma_client.create_collection("task_metadata")
                 print("✅ Created new Chroma collection")
             
@@ -58,6 +65,7 @@ class EmbeddingEngine:
             self.initialized = True
             
         except Exception as e:
+            self.error_reason = f"Error initializing embedding system: {str(e)}"
             print(f"⚠️ Error initializing embeddings: {e}")
             print("⚠️ Using fallback text matching without embeddings")
     
@@ -69,10 +77,11 @@ class EmbeddingEngine:
         with self.lock:
             try:
                 # Create embedding for the task
-                task.embedding = self.embedding_model.encode(task.description)
+                task_embedding = self.embedding_model.encode(task.description)
+                task.embedding = task_embedding  # Assign to task object
                 
                 # Add to FAISS index
-                vector = np.array([task.embedding], dtype=np.float32)
+                vector = np.array([task_embedding], dtype=np.float32)
                 self.faiss_index.add(vector)
                 self.id_to_index[task.id] = self.next_index
                 self.index_to_id[self.next_index] = task.id
@@ -104,18 +113,18 @@ class EmbeddingEngine:
         
         with self.lock:
             try:
-                # Remove old embedding from FAISS
-                if task.id in self.id_to_index:
-                    old_index = self.id_to_index[task.id]
-                    # FAISS doesn't support direct removal, so we'd rebuild the index
-                    # This is a simple version - in production, we'd use a more efficient approach
-                    # like maintaining a mask of active indices
-                    
+                # Remove old embedding from ChromaDB if it exists
+                try:
+                    self.task_collection.delete(ids=[task.id])
+                except Exception as e:
+                    print(f"Note: Could not delete old task embedding: {e}")
+                
                 # Generate new embedding
-                task.embedding = self.embedding_model.encode(task.description)
+                task_embedding = self.embedding_model.encode(task.description)
+                task.embedding = task_embedding  # Update task object
                 
                 # Update ChromaDB
-                self.task_collection.update(
+                self.task_collection.add(
                     documents=[task.description],
                     metadatas=[{
                         "id": task.id,
@@ -129,7 +138,7 @@ class EmbeddingEngine:
                 )
                 
                 # For FAISS, we'll just add it again and keep track of the latest index
-                vector = np.array([task.embedding], dtype=np.float32)
+                vector = np.array([task_embedding], dtype=np.float32)
                 self.faiss_index.add(vector)
                 
                 # Update index mappings
@@ -153,6 +162,16 @@ class EmbeddingEngine:
         
         with self.lock:
             try:
+                # Check if task exists in collection
+                try:
+                    results = self.task_collection.get(ids=[task.id])
+                    if not results or not results['ids']:
+                        print(f"Task {task.id} not found in collection, adding instead")
+                        return self.add_task_embedding(task)
+                except Exception as e:
+                    print(f"Error checking task: {e}")
+                    return self.add_task_embedding(task)
+                
                 # Update ChromaDB metadata
                 self.task_collection.update(
                     metadatas=[{
@@ -179,10 +198,12 @@ class EmbeddingEngine:
         with self.lock:
             try:
                 # Remove from ChromaDB
-                self.task_collection.delete(ids=[task_id])
+                try:
+                    self.task_collection.delete(ids=[task_id])
+                except Exception as e:
+                    print(f"Note: Could not delete task from ChromaDB: {e}")
                 
-                # For FAISS, rebuilding the index would be needed for proper removal
-                # Here we just update our mappings and ignore the orphaned vector
+                # For FAISS, update our mappings and ignore the orphaned vector
                 if task_id in self.id_to_index:
                     index = self.id_to_index[task_id]
                     del self.id_to_index[task_id]
@@ -197,12 +218,13 @@ class EmbeddingEngine:
     def find_similar_tasks(self, task, threshold=0.7, max_results=5):
         """Find tasks similar to the given task using vector similarity"""
         if not self.initialized:
-            return []
+            # Use fallback text matching
+            return self._fallback_find_similar_tasks(task, threshold, max_results)
         
         with self.lock:
             try:
                 # If task doesn't have an embedding yet, create one
-                query_embedding = task.embedding
+                query_embedding = getattr(task, 'embedding', None)
                 if query_embedding is None:
                     query_embedding = self.embedding_model.encode(task.description)
                 
@@ -242,46 +264,96 @@ class EmbeddingEngine:
                             self.similarity_scores = self.similarity_scores[-100:]
                         
                         if similarity >= threshold:
-                            similar_task_ids.append(task_id)
+                            similar_task_ids.append((task_id, similarity))
                 
-                return similar_task_ids
+                # Sort by similarity and return just the IDs
+                similar_task_ids.sort(key=lambda x: x[1], reverse=True)
+                return [task_id for task_id, _ in similar_task_ids[:max_results]]
             except Exception as e:
                 print(f"⚠️ Error finding similar tasks: {e}")
-                return []
+                return self._fallback_find_similar_tasks(task, threshold, max_results)
+    
+    def _fallback_find_similar_tasks(self, task, threshold=0.7, max_results=5):
+        """Fallback method to find similar tasks when embeddings are not available"""
+        # This would require all tasks to be provided or fetched from a database
+        # In a real implementation, you would need to pass the task collection or fetch it
+        print("Using fallback text matching for finding similar tasks")
+        return []  # In a real implementation, return actual matches
     
     def calculate_similarity(self, task1, task2):
         """Calculate similarity between two tasks"""
         if not self.initialized:
-            # Fallback to simple text matching
-            task1_words = set(task1.description.lower().split())
-            task2_words = set(task2.description.lower().split())
-            
-            if not task1_words or not task2_words:
-                return 0.0
-            
-            return len(task1_words.intersection(task2_words)) / len(task1_words.union(task2_words))
+            return self._fallback_calculate_similarity(task1, task2)
         
         with self.lock:
             try:
                 # Make sure both tasks have embeddings
-                if task1.embedding is None:
-                    task1.embedding = self.embedding_model.encode(task1.description)
+                embedding1 = getattr(task1, 'embedding', None)
+                if embedding1 is None:
+                    embedding1 = self.embedding_model.encode(task1.description)
+                    task1.embedding = embedding1
                 
-                if task2.embedding is None:
-                    task2.embedding = self.embedding_model.encode(task2.description)
+                embedding2 = getattr(task2, 'embedding', None)
+                if embedding2 is None:
+                    embedding2 = self.embedding_model.encode(task2.description)
+                    task2.embedding = embedding2
                 
                 # Calculate cosine similarity
-                dot_product = np.dot(task1.embedding, task2.embedding)
-                norm1 = np.linalg.norm(task1.embedding)
-                norm2 = np.linalg.norm(task2.embedding)
+                dot_product = np.dot(embedding1, embedding2)
+                norm1 = np.linalg.norm(embedding1)
+                norm2 = np.linalg.norm(embedding2)
                 
                 if norm1 == 0 or norm2 == 0:
                     return 0.0
                 
-                return dot_product / (norm1 * norm2)
+                similarity = dot_product / (norm1 * norm2)
+                
+                # Track similarity statistics
+                self.similarity_scores.append(similarity)
+                if len(self.similarity_scores) > 100:
+                    self.similarity_scores = self.similarity_scores[-100:]
+                
+                return similarity
             except Exception as e:
                 print(f"⚠️ Error calculating similarity: {e}")
-                return 0.0
+                return self._fallback_calculate_similarity(task1, task2)
+    
+    def _fallback_calculate_similarity(self, task1, task2):
+        """Enhanced fallback text matching with TF-IDF inspired weighting"""
+        def tokenize(text):
+            # Remove punctuation and convert to lowercase
+            words = ''.join(c.lower() for c in text if c.isalnum() or c.isspace()).split()
+            # Remove common words
+            stopwords = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'is', 'are'}
+            return [w for w in words if w not in stopwords]
+        
+        # Get weighted term frequencies
+        task1_words = tokenize(task1.description)
+        task2_words = tokenize(task2.description)
+        
+        if not task1_words or not task2_words:
+            return 0.0
+        
+        # Calculate word frequencies
+        word_freq1 = {}
+        word_freq2 = {}
+        for word in task1_words:
+            word_freq1[word] = word_freq1.get(word, 0) + 1
+        for word in task2_words:
+            word_freq2[word] = word_freq2.get(word, 0) + 1
+        
+        # Calculate similarity with term frequency weighting
+        common_words = set(word_freq1.keys()) & set(word_freq2.keys())
+        if not common_words:
+            return 0.0
+        
+        similarity = 0
+        for word in common_words:
+            similarity += min(word_freq1[word], word_freq2[word])
+        
+        # Normalize by total word count
+        max_words = max(len(task1_words), len(task2_words))
+        return similarity / max_words
     
     def get_adaptive_threshold(self):
         """Calculate adaptive threshold based on historical similarity scores"""
@@ -360,25 +432,32 @@ class EmbeddingEngine:
         if not self.initialized:
             return {
                 "status": "not_initialized",
-                "fallback_method": "text_matching",
-                "reason": "Required libraries not available"
+                "fallback_method": self.fallback_method,
+                "reason": self.error_reason or "Unknown reason"
             }
         
         with self.lock:
-            return {
+            stats = {
                 "status": "initialized",
                 "model": self.model_name,
                 "embedding_dimension": self.embedding_dim,
-                "indexed_tasks": self.faiss_index.ntotal,
+                "indexed_tasks": self.faiss_index.ntotal if hasattr(self, 'faiss_index') else 0,
                 "similarity_threshold": {
                     "current": self.get_adaptive_threshold(),
                     "history": self.threshold_history[-5:] if self.threshold_history else []
                 },
                 "similarity_distribution": {
-                    "mean": np.mean(self.similarity_scores) if self.similarity_scores else None,
-                    "median": np.median(self.similarity_scores) if self.similarity_scores else None,
-                    "min": min(self.similarity_scores) if self.similarity_scores else None,
-                    "max": max(self.similarity_scores) if self.similarity_scores else None,
                     "samples": len(self.similarity_scores)
                 }
             }
+            
+            # Add statistics only if we have similarity scores
+            if self.similarity_scores:
+                stats["similarity_distribution"].update({
+                    "mean": float(np.mean(self.similarity_scores)),
+                    "median": float(np.median(self.similarity_scores)),
+                    "min": float(min(self.similarity_scores)),
+                    "max": float(max(self.similarity_scores))
+                })
+            
+            return stats
