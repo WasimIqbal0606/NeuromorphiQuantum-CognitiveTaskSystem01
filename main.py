@@ -952,34 +952,34 @@ def render_task_list(tasks_data, show_filter=True):
 def render_new_task_form():
     """Render the form for creating a new task"""
     st.header("Create New Task")
-    
+
     with st.form("new_task_form"):
         # Task description
         description = st.text_area("Task Description", placeholder="Describe the task...")
-        
+
         # Columns for other fields
         col1, col2 = st.columns(2)
-        
+
         with col1:
             # Priority slider
             priority = st.slider("Priority", min_value=0.0, max_value=1.0, value=0.5, step=0.1)
-            
+
             # Assignee
             assignee = st.text_input("Assignee", placeholder="Who should work on this?")
-        
+
         with col2:
             # Deadline
             deadline = st.date_input("Deadline (optional)", value=None)
-            
+
             # Tags
             tags_input = st.text_input("Tags (comma-separated)", placeholder="tag1, tag2, tag3")
-        
+
         # Suggested tags based on description (computed when description changes)
         if description:
             import re
             # Simple tag extraction based on common patterns
             potential_tags = []
-            
+
             # Look for common categories
             categories = {
                 "bug": ["bug", "issue", "fix", "error", "crash", "broken"],
@@ -991,109 +991,110 @@ def render_new_task_form():
                 "testing": ["test", "QA", "verify", "validation"],
                 "urgent": ["urgent", "ASAP", "immediately", "critical"]
             }
-            
+
             # Check for category matches
             description_lower = description.lower()
             for category, keywords in categories.items():
                 if any(keyword in description_lower for keyword in keywords):
                     potential_tags.append(category)
-            
+
             # Look for hashtags in the description
             hashtags = re.findall(r'#(\w+)', description)
             if hashtags:
                 potential_tags.extend(hashtags)
-            
+
             # Display suggested tags if found
             if potential_tags:
                 st.caption("Suggested tags: " + ", ".join(potential_tags))
-        
+
         # Submit button
         submitted = st.form_submit_button("Create Task", type="primary")
-        
-        if submitted:
-            # Process the tags
-            tags = []
-            if tags_input:
-                tags = [tag.strip() for tag in tags_input.split(",") if tag.strip()]
-            
-            # Prepare the task data
-            task_data = {
-                "description": description,
-                "priority": priority,
-                "assignee": assignee if assignee else None,
-                "tags": tags
-            }
-            
-            # Add deadline if set
-            if deadline:
-                task_data["deadline"] = datetime.combine(deadline, datetime.min.time()).isoformat()
-            
-            # Create the task
-            result = create_task(task_data)
-            
-            if result:
-                st.success("Task created successfully!")
-                
-                # Show suggested entanglements if any
-                if "suggested_entanglements" in result and result["suggested_entanglements"]:
-                    st.subheader("Suggested Related Tasks")
-                    st.info("We found some potentially related tasks. Would you like to create entanglements?")
-                    
-                    for related_id in result["suggested_entanglements"]:
-                        related_task = get_task(related_id)
-                        if related_task:
-                            st.markdown(f"**{related_task.get('description', 'Unknown Task')}**")
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                if st.button(f"Create Entanglement with {related_id[:8]}", key=f"entangle_{related_id}", use_container_width=True):
-                                    entangle_result = entangle_tasks(result["id"], related_id)
-                                    if entangle_result:
-                                        st.success("Entanglement created successfully")
-                            with col2:
-                                if st.button(f"Skip", key=f"skip_{related_id}", use_container_width=True):
-                                    pass
-                            st.divider()
-                
-                # Option to go to task list or create another
-                st.divider()
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("View Task List", use_container_width=True):
-                        navigate_to('tasks')
-                with col2:
-                    if st.button("Create Another Task", use_container_width=True):
-                        navigate_to('new_task')
-            else:
-                st.error("Failed to create task. Please try again.")
+
+    # Note: These buttons are now OUTSIDE the form
+    if submitted:
+        # Process the tags
+        tags = []
+        if tags_input:
+            tags = [tag.strip() for tag in tags_input.split(",") if tag.strip()]
+
+        # Prepare the task data
+        task_data = {
+            "description": description,
+            "priority": priority,
+            "assignee": assignee if assignee else None,
+            "tags": tags
+        }
+
+        # Add deadline if set
+        if deadline:
+            task_data["deadline"] = datetime.combine(deadline, datetime.min.time()).isoformat()
+
+        # Create the task
+        result = create_task(task_data)
+
+        if result:
+            st.success("Task created successfully!")
+
+            # Show suggested entanglements if any
+            if "suggested_entanglements" in result and result["suggested_entanglements"]:
+                st.subheader("Suggested Related Tasks")
+                st.info("We found some potentially related tasks. Would you like to create entanglements?")
+
+                for related_id in result["suggested_entanglements"]:
+                    related_task = get_task(related_id)
+                    if related_task:
+                        st.markdown(f"**{related_task.get('description', 'Unknown Task')}**")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button(f"Create Entanglement with {related_id[:8]}", key=f"entangle_{related_id}", use_container_width=True):
+                                entangle_result = entangle_tasks(result["id"], related_id)
+                                if entangle_result:
+                                    st.success("Entanglement created successfully")
+                        with col2:
+                            if st.button(f"Skip", key=f"skip_{related_id}", use_container_width=True):
+                                pass
+                        st.divider()
+
+            # Option to go to task list or create another
+            st.divider()
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("View Task List", use_container_width=True):
+                    navigate_to('tasks')
+            with col2:
+                if st.button("Create Another Task", use_container_width=True):
+                    navigate_to('new_task')
+        else:
+            st.error("Failed to create task. Please try again.")
 
 def render_edit_task_form(task_id):
     """Render the form for editing an existing task"""
     task = get_task(task_id)
-    
+
     if not task:
         st.error(f"Failed to load task {task_id}")
         return
-    
+
     st.header(f"Edit Task: {task.get('description', 'Unknown')[:50]}...")
-    
+
     with st.form("edit_task_form"):
         # Task description
         description = st.text_area("Task Description", value=task.get("description", ""))
-        
+
         # Columns for other fields
         col1, col2 = st.columns(2)
-        
+
         with col1:
             # Priority slider
             priority = st.slider("Priority", min_value=0.0, max_value=1.0, value=task.get("priority", 0.5), step=0.1)
-            
+
             # Assignee
             assignee = st.text_input("Assignee", value=task.get("assignee", ""))
-            
+
             # State selection
             states = ["PENDING", "ENTANGLED", "RESOLVED", "DEFERRED", "CANCELLED"]
             state = st.selectbox("State", states, index=states.index(task.get("state", "PENDING")) if task.get("state") in states else 0)
-        
+
         with col2:
             # Deadline
             current_deadline = None
@@ -1102,61 +1103,62 @@ def render_edit_task_form(task_id):
                     current_deadline = datetime.fromisoformat(task.get("deadline").replace('Z', '+00:00')).date()
                 except:
                     pass
-            
+
             deadline = st.date_input("Deadline (optional)", value=current_deadline)
-            
+
             # Tags
             current_tags = ", ".join(task.get("tags", []))
             tags_input = st.text_input("Tags (comma-separated)", value=current_tags)
-            
+
             # Entropy (advanced)
             show_advanced = st.toggle("Show Advanced Options")
-            
+
             if show_advanced:
                 entropy = st.slider("Entropy", min_value=0.0, max_value=1.0, value=task.get("entropy", 1.0), step=0.05)
-        
+
         # Submit button
         submitted = st.form_submit_button("Update Task", type="primary")
-        
-        if submitted:
-            # Process the tags
-            tags = []
-            if tags_input:
-                tags = [tag.strip() for tag in tags_input.split(",") if tag.strip()]
-            
-            # Prepare the task data
-            task_data = {
-                "description": description,
-                "priority": priority,
-                "assignee": assignee if assignee else None,
-                "state": state,
-                "tags": tags
-            }
-            
-            # Add entropy if changed
-            if show_advanced:
-                task_data["entropy"] = entropy
-            
-            # Add deadline if set
-            if deadline:
-                task_data["deadline"] = datetime.combine(deadline, datetime.min.time()).isoformat()
-            
-            # Update the task
-            result = update_task(task_id, task_data)
-            
-            if result:
-                st.success("Task updated successfully!")
-                
-                # Option to go back
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("View Task Details", use_container_width=True):
-                        navigate_to('task_details', task_details_id=task_id)
-                with col2:
-                    if st.button("Return to Task List", use_container_width=True):
-                        navigate_to('tasks')
-            else:
-                st.error("Failed to update task. Please try again.")
+
+    # Note: These buttons are now OUTSIDE the form
+    if submitted:
+        # Process the tags
+        tags = []
+        if tags_input:
+            tags = [tag.strip() for tag in tags_input.split(",") if tag.strip()]
+
+        # Prepare the task data
+        task_data = {
+            "description": description,
+            "priority": priority,
+            "assignee": assignee if assignee else None,
+            "state": state,
+            "tags": tags
+        }
+
+        # Add entropy if changed
+        if show_advanced:
+            task_data["entropy"] = entropy
+
+        # Add deadline if set
+        if deadline:
+            task_data["deadline"] = datetime.combine(deadline, datetime.min.time()).isoformat()
+
+        # Update the task
+        result = update_task(task_id, task_data)
+
+        if result:
+            st.success("Task updated successfully!")
+
+            # Option to go back
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("View Task Details", use_container_width=True):
+                    navigate_to('task_details', task_details_id=task_id)
+            with col2:
+                if st.button("Return to Task List", use_container_width=True):
+                    navigate_to('tasks')
+        else:
+            st.error("Failed to update task. Please try again.")
 
 def render_task_details(task_id):
     """Render detailed view of a single task"""
