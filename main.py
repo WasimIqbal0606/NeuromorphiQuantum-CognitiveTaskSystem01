@@ -39,9 +39,8 @@ import functools
 # API endpoint - Updated for local development
 API_URL = "http://localhost:5000"
 
-# Setup flag to use mock data by default, with an option to switch to mock
-if 'use_mock_data' not in st.session_state:
-    st.session_state.use_mock_data = False
+# Setup flag to use real data by default, with an option to switch to mock
+USE_MOCK_DATA = False
 
 # Try to directly initialize the embedding engine
 try:
@@ -171,7 +170,7 @@ def api_request(endpoint, method="GET", data=None, params=None):
     url = f"{API_URL}{endpoint}"
     
     # If mock data is enabled, return simulated responses
-    if st.session_state.use_mock_data:
+    if USE_MOCK_DATA:
         return generate_mock_response(endpoint, method, data, params)
     
     # Try direct access for embedding stats if available
@@ -206,7 +205,7 @@ def api_request(endpoint, method="GET", data=None, params=None):
     except requests.exceptions.ConnectionError:
         st.error(f"Connection error: Could not connect to {url}. Is the backend running?")
         # Fall back to mock data if API connection fails
-        if not st.session_state.use_mock_data:
+        if not USE_MOCK_DATA:
             print("Falling back to mock data due to connection error")
             return generate_mock_response(endpoint, method, data, params)
         return None
@@ -698,7 +697,7 @@ def get_embedding_statistics():
     refresh_key = st.session_state.refresh_trigger
     
     # Try direct access if available
-    if not st.session_state.use_mock_data and direct_embedding_available:
+    if not USE_MOCK_DATA and direct_embedding_available:
         try:
             return embedding_engine.get_embedding_statistics()
         except Exception as e:
@@ -745,7 +744,7 @@ def render_header():
             st.metric("Version", system_info.get("version", "Unknown"))
             
         with status_cols[4]:
-            api_mode = "Mock" if st.session_state.use_mock_data else "Live"
+            api_mode = "Mock" if USE_MOCK_DATA else "Live"
             st.metric("API Mode", api_mode)
 
 def render_sidebar():
