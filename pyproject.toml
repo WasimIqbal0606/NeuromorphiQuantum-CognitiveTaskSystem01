@@ -3,20 +3,20 @@ name = "repl-nix-workspace"
 version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.11"
-dependencies = [
-    "fastapi>=0.115.0,<0.116.0",     # Latest stable FastAPI
-    "matplotlib>=3.10.0,<3.11.0",     # Compatible matplotlib version
-    "numpy>=1.23.5,<2.0.0",           # Numpy version compatible with other packages
-    "pandas>=2.2.0,<3.0.0",           # Stable pandas version
-    "pillow>=11.0.0,<12.0.0",         # Latest Pillow compatible with Python 3.11+
-    "pydantic>=2.11.0,<3.0.0",        # Compatible with FastAPI
-    "requests>=2.32.0,<3.0.0",        # Latest stable requests
-    "streamlit>=1.44.0,<2.0.0",       # Latest Streamlit
-    "uvicorn>=0.18.0,<0.20.0",        # Compatible with FastAPI
-    "sentence-transformers>=2.2.0,<3.0.0", # Latest stable sentence-transformers
-    "chromadb>=0.4.0,<1.0.0",         # Vector database
-    "faiss-cpu>=1.7.2,<2.0.0",        # FAISS for efficient similarity search
-]
+dependencies = {
+    "fastapi": ">=0.115.0,<0.116.0",
+    "matplotlib": ">=3.10.0,<3.11.0",
+    "numpy": ">=1.23.5,<2.0.0",
+    "pandas": ">=2.2.0,<3.0.0",
+    "pillow": ">=11.0.0,<12.0.0",
+    "pydantic": ">=2.11.0,<3.0.0",
+    "requests": ">=2.32.0,<3.0.0",
+    "streamlit": ">=1.44.0,<2.0.0",
+    "uvicorn": ">=0.18.0,<0.20.0",
+    "sentence-transformers": ">=2.2.0,<3.0.0",
+    "chromadb": ">=0.4.0,<1.0.0",
+    "faiss-cpu": ">=1.7.2,<2.0.0",
+}
 
 [[tool.uv.index]]
 explicit = true
