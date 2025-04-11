@@ -13,7 +13,7 @@ dependencies = [
     "requests>=2.32.0,<3.0.0",
     "streamlit>=1.44.0,<2.0.0",
     "uvicorn>=0.18.0,<0.20.0",
-    "sentence-transformers>=2.2.0,<3.0.0",
+    "sentence-transformers>=3.0.0,<4.0.0"
     "chromadb>=0.4.0,<1.0.0",
     "faiss-cpu>=1.7.2,<2.0.0"
 ]
