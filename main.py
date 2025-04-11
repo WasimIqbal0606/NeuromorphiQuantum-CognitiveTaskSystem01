@@ -42,7 +42,7 @@ import functools
 API_URL = "http://0.0.0.0:8000"
 
 # Setup flag to use mock data since API server is not running
-USE_MOCK_DATA = True
+USE_MOCK_DATA = False
 
 # Session state initialization for page navigation
 if 'page' not in st.session_state:
