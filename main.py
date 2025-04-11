@@ -39,7 +39,7 @@ import functools
 # API endpoint
 # For development, we need to make sure this matches where the API server is running
 # Currently, we're setting up to use a direct connection without separate API server for simplicity
-API_URL = "http://127.0.0.1:8000"
+API_URL = "http://0.0.0.0:8000"
 
 # Setup flag to use mock data since API server is not running
 USE_MOCK_DATA = True
