@@ -784,13 +784,14 @@ def render_sidebar():
         st.rerun()
     
     # Add Mock/Live toggle
-    use_mock = st.sidebar.toggle("Use Mock Data", value=USE_MOCK_DATA)
-    if use_mock != USE_MOCK_DATA:
-        # This requires modifying the global variable
-        global USE_MOCK_DATA
-        USE_MOCK_DATA = use_mock
-        trigger_refresh()
-    
-    # Add refresh button
-    if st.sidebar.button("🔄 Refresh Data", use_container_width=True):
-        trigger_refresh()
+global USE_MOCK_DATA  # Declare global before using or assigning
+use_mock = st.sidebar.toggle("Use Mock Data", value=USE_MOCK_DATA)
+if use_mock != USE_MOCK_DATA:
+    USE_MOCK_DATA = use_mock
+    trigger_refresh()
+
+# Add refresh button
+if st.sidebar.button("🔄 Refresh Data", use_container_width=True):
+    trigger_refresh()
+
+
