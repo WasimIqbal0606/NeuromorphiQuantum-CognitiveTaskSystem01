@@ -4,18 +4,18 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.115.12",
-    "matplotlib>=3.10.1",
-    "numpy>=2.2.4",
-    "pandas>=2.2.3",
-    "pillow>=11.1.0",
-    "pydantic>=2.11.3",
-    "requests>=2.32.3",
-    "streamlit>=1.44.1",
-    "uvicorn>=0.34.0",
-    "sentence-transformers",
-    "chromadb",
-    "faiss-cpu"
+    "fastapi>=0.115.12,<0.115.13",  # Fix version for stability
+    "matplotlib>=3.10.1,<3.11",  # Fix to avoid potential incompatibility
+    "numpy>=1.23.5,<2.0",  # Ensure compatibility with FastAPI and others
+    "pandas>=2.2.3,<3.0",  # Ensure compatibility with other libraries
+    "pillow>=11.1.0,<12.0",  # Ensure compatibility
+    "pydantic>=2.11.3,<2.12",  # Compatibility fix for Pydantic
+    "requests>=2.32.3,<3.0",  # Ensure no conflicts with FastAPI
+    "streamlit>=1.44.1,<2.0",  # Streamlit version compatible with FastAPI
+    "uvicorn>=0.18.0,<0.20",  # Compatible Uvicorn version for FastAPI
+    "sentence-transformers>=2.2.0,<3.0",  # Avoid potential conflicts
+    "chromadb>=0.4.0,<1.0",  # Avoid major version conflicts
+    "faiss-cpu>=1.7.2,<1.8",  # FAISS version compatibility with other libraries
 ]
 
 [[tool.uv.index]]
