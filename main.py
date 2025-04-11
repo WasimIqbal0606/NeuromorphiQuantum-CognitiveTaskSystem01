@@ -793,4 +793,4 @@ def render_sidebar():
     
     # Add refresh button
     if st.sidebar.button("🔄 Refresh Data", use_container_width=True):
-        trigger
+        trigger_refresh()
