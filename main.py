@@ -786,4 +786,5 @@ def render_sidebar():
     
     # Add Mock/Live toggle
     use_mock = st.sidebar.toggle("Use Mock Data", value=st.session_state.use_mock_data)
-    if use_mock != st.session_
+    if use_mock != st.session_state.use_mock_data:
+        st.
