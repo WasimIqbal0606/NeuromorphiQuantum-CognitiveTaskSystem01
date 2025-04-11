@@ -39,8 +39,9 @@ import functools
 # API endpoint - Updated for local development
 API_URL = "http://localhost:5000"
 
-# Setup flag to use real data by default, with an option to switch to mock
-USE_MOCK_DATA = False
+# Setup flag to use mock data by default, with an option to switch to mock
+if 'use_mock_data' not in st.session_state:
+    st.session_state.use_mock_data = False
 
 # Try to directly initialize the embedding engine
 try:
@@ -170,7 +171,7 @@ def api_request(endpoint, method="GET", data=None, params=None):
     url = f"{API_URL}{endpoint}"
     
     # If mock data is enabled, return simulated responses
-    if USE_MOCK_DATA:
+    if st.session_state.use_mock_data:
         return generate_mock_response(endpoint, method, data, params)
     
     # Try direct access for embedding stats if available
@@ -205,7 +206,7 @@ def api_request(endpoint, method="GET", data=None, params=None):
     except requests.exceptions.ConnectionError:
         st.error(f"Connection error: Could not connect to {url}. Is the backend running?")
         # Fall back to mock data if API connection fails
-        if not USE_MOCK_DATA:
+        if not st.session_state.use_mock_data:
             print("Falling back to mock data due to connection error")
             return generate_mock_response(endpoint, method, data, params)
         return None
@@ -697,7 +698,7 @@ def get_embedding_statistics():
     refresh_key = st.session_state.refresh_trigger
     
     # Try direct access if available
-    if not USE_MOCK_DATA and direct_embedding_available:
+    if not st.session_state.use_mock_data and direct_embedding_available:
         try:
             return embedding_engine.get_embedding_statistics()
         except Exception as e:
@@ -744,7 +745,7 @@ def render_header():
             st.metric("Version", system_info.get("version", "Unknown"))
             
         with status_cols[4]:
-            api_mode = "Mock" if USE_MOCK_DATA else "Live"
+            api_mode = "Mock" if st.session_state.use_mock_data else "Live"
             st.metric("API Mode", api_mode)
 
 def render_sidebar():
@@ -784,13 +785,5 @@ def render_sidebar():
         st.rerun()
     
     # Add Mock/Live toggle
-    use_mock = st.sidebar.toggle("Use Mock Data", value=USE_MOCK_DATA)
-    if use_mock != USE_MOCK_DATA:
-        # This requires modifying the global variable
-        global USE_MOCK_DATA
-        USE_MOCK_DATA = use_mock
-        trigger_refresh()
-    
-    # Add refresh button
-    if st.sidebar.button("🔄 Refresh Data", use_container_width=True):
-        trigger_refresh()
+    use_mock = st.sidebar.toggle("Use Mock Data", value=st.session_state.use_mock_data)
+    if use_mock != st.session_
