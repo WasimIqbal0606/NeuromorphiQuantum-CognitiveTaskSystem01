@@ -1,411 +1,796 @@
+print("✅ Starting Streamlit app")
+
+import streamlit as st
+import os
+# Configure page must be the first streamlit command
+st.set_page_config(
+    page_title="Quantum Task Manager",
+    page_icon="🧠",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+import os
+# Set port to match deployment configuration
+PORT = 8501
+HEALTH_PORT = PORT
+
 """
-Advanced embedding and similarity engine for Neuromorphic Quantum-Cognitive Task System
+Neuromorphic Quantum-Cognitive Task Management System UI
+A Streamlit-based interface for managing quantum-inspired tasks with advanced visualizations
 """
 
-import numpy as np
-import threading
-from typing import List, Dict, Any, Optional, Tuple
+import json
 import time
-from datetime import datetime
+import asyncio
+import base64
+import requests
+import numpy as np
+import pandas as pd
+from datetime import datetime, timedelta
+from typing import List, Dict, Any, Optional, Union
+import matplotlib.pyplot as plt
+import io
+import threading
+import random
+from PIL import Image
+import functools
 
+# API endpoint - Updated for local development
+API_URL = "http://localhost:5000"
+
+# Setup flag to use real data by default, with an option to switch to mock
+USE_MOCK_DATA = False
+
+# Try to directly initialize the embedding engine
 try:
-    from sentence_transformers import SentenceTransformer
-    import chromadb
-    import faiss
-    EMBEDDING_AVAILABLE = True
-except ImportError:
-    EMBEDDING_AVAILABLE = False
+    from embedding_engine import EmbeddingEngine
+    embedding_engine = EmbeddingEngine()
+    print("✅ Embedding engine initialized directly")
+    direct_embedding_available = True
+except Exception as e:
+    print(f"⚠️ Direct embedding engine not available: {e}")
+    embedding_engine = None
+    direct_embedding_available = False
 
+# Session state initialization for page navigation
+if 'page' not in st.session_state:
+    st.session_state.page = 'dashboard'
 
-class EmbeddingEngine:
-    """Manages neural embeddings for tasks with adaptive similarity thresholds"""
+if 'task_details_id' not in st.session_state:
+    st.session_state.task_details_id = None
+
+if 'edit_task_id' not in st.session_state:
+    st.session_state.edit_task_id = None
+
+if 'task_filter_state' not in st.session_state:
+    st.session_state.task_filter_state = None
+
+if 'task_filter_assignee' not in st.session_state:
+    st.session_state.task_filter_assignee = None
+
+if 'task_filter_search' not in st.session_state:
+    st.session_state.task_filter_search = ""
+
+if 'refresh_trigger' not in st.session_state:
+    st.session_state.refresh_trigger = 0
+
+if 'show_completed' not in st.session_state:
+    st.session_state.show_completed = False
+
+if 'dark_mode' not in st.session_state:
+    st.session_state.dark_mode = True
+
+# Navigation function
+def navigate_to(page, **kwargs):
+    """Navigate to a specific page and optionally set additional state"""
+    st.session_state.page = page
+    for key, value in kwargs.items():
+        if key in st.session_state:
+            st.session_state[key] = value
+    st.rerun()
+
+# Trigger refresh
+def trigger_refresh():
+    """Trigger a refresh of the UI"""
+    st.session_state.refresh_trigger += 1
+    st.rerun()
+
+# Date formatting utility
+def format_date(date_str):
+    """Format an ISO date string to a readable format"""
+    if not date_str:
+        return "N/A"
+    try:
+        dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+        now = datetime.now()
+        diff = now - dt
+        
+        if diff.days == 0:
+            if diff.seconds < 60:
+                return "Just now"
+            elif diff.seconds < 3600:
+                return f"{diff.seconds // 60} minutes ago"
+            else:
+                return f"{diff.seconds // 3600} hours ago"
+        elif diff.days == 1:
+            return "Yesterday"
+        elif diff.days < 7:
+            return f"{diff.days} days ago"
+        else:
+            return dt.strftime("%Y-%m-%d")
+    except Exception:
+        return date_str
+
+# Deadline formatting utility
+def format_deadline(deadline_str):
+    """Format a deadline string into a human-readable format with urgency indicators"""
+    if not deadline_str:
+        return "", "normal"
     
-    def __init__(self, model_name='all-MiniLM-L6-v2'):
-        self.lock = threading.RLock()
-        self.initialized = False
-        self.model_name = model_name
-        self.embedding_dim = 384  # Default for all-MiniLM-L6-v2
+    try:
+        deadline = datetime.fromisoformat(deadline_str.replace('Z', '+00:00'))
+        now = datetime.now()
+        diff = deadline - now
         
-        if not EMBEDDING_AVAILABLE:
-            print("⚠️ Embedding libraries not available. Using fallback text matching.")
-            return
-        
+        if diff.days < 0:
+            return f"⚠️ Overdue by {abs(diff.days)} days", "overdue"
+        elif diff.days == 0:
+            remaining_hours = diff.seconds // 3600
+            if remaining_hours < 1:
+                return f"⚠️ Due in {diff.seconds // 60} minutes", "urgent"
+            else:
+                return f"⚠️ Due in {remaining_hours} hours", "urgent"
+        elif diff.days == 1:
+            return "Due tomorrow", "soon"
+        elif diff.days <= 3:
+            return f"Due in {diff.days} days", "soon"
+        else:
+            return deadline.strftime("%Y-%m-%d"), "normal"
+    except Exception:
+        return deadline_str, "normal"
+
+# Priority formatting
+def format_priority(priority):
+    """Format priority as text and return appropriate color"""
+    if priority >= 0.8:
+        return "Critical", "red"
+    elif priority >= 0.6:
+        return "High", "orange"
+    elif priority >= 0.4:
+        return "Medium", "blue"
+    elif priority >= 0.2:
+        return "Low", "green"
+    else:
+        return "Minimal", "gray"
+
+# API interaction functions with improved error handling
+def api_request(endpoint, method="GET", data=None, params=None):
+    """Make an API request to the backend with improved error handling"""
+    url = f"{API_URL}{endpoint}"
+    
+    # If mock data is enabled, return simulated responses
+    if USE_MOCK_DATA:
+        return generate_mock_response(endpoint, method, data, params)
+    
+    # Try direct access for embedding stats if available
+    if endpoint == "/system/embedding-stats" and direct_embedding_available:
         try:
-            # Initialize the embedding model
-            self.embedding_model = SentenceTransformer(model_name)
-            print(f"✅ Embedding model {model_name} initialized successfully")
-            
-            # Initialize ChromaDB
-            self.chroma_client = chromadb.Client()
-            try:
-                self.task_collection = self.chroma_client.get_collection("task_metadata")
-                print("✅ Using existing Chroma collection")
-            except:
-                self.task_collection = self.chroma_client.create_collection("task_metadata")
-                print("✅ Created new Chroma collection")
-            
-            # Initialize FAISS
-            self.faiss_index = faiss.IndexFlatL2(self.embedding_dim)
-            self.id_to_index = {}  # Map task ID to FAISS index
-            self.index_to_id = {}  # Map FAISS index to task ID
-            self.next_index = 0  # Next available FAISS index
-            print("✅ FAISS index initialized")
-            
-            # Track similarity statistics for adaptive thresholding
-            self.similarity_scores = []
-            self.threshold_history = []
-            
-            self.initialized = True
-            
+            return embedding_engine.get_embedding_statistics()
         except Exception as e:
-            print(f"⚠️ Error initializing embeddings: {e}")
-            print("⚠️ Using fallback text matching without embeddings")
+            print(f"⚠️ Error getting direct embedding statistics: {e}")
+            # Continue to try API request as fallback
     
-    def add_task_embedding(self, task):
-        """Add embedding for a task"""
-        if not self.initialized:
-            return False
+    # Try to connect to API server
+    try:
+        print(f"Making {method} request to {url}")  # Debug logging
         
-        with self.lock:
-            try:
-                # Create embedding for the task
-                task.embedding = self.embedding_model.encode(task.description)
-                
-                # Add to FAISS index
-                vector = np.array([task.embedding], dtype=np.float32)
-                self.faiss_index.add(vector)
-                self.id_to_index[task.id] = self.next_index
-                self.index_to_id[self.next_index] = task.id
-                self.next_index += 1
-                
-                # Add to ChromaDB
-                self.task_collection.add(
-                    documents=[task.description],
-                    metadatas=[{
-                        "id": task.id,
-                        "priority": float(task.priority),
-                        "state": task.state,
-                        "entropy": float(task.entropy),
-                        "assignee": task.assignee or "unassigned",
-                        "tags": ",".join(task.tags) if task.tags else ""
-                    }],
-                    ids=[task.id]
-                )
-                
-                return True
-            except Exception as e:
-                print(f"⚠️ Error adding task embedding: {e}")
-                return False
+        if method == "GET":
+            response = requests.get(url, params=params, timeout=10)
+        elif method == "POST":
+            response = requests.post(url, json=data, timeout=10)
+        elif method == "PUT":
+            response = requests.put(url, json=data, timeout=10)
+        elif method == "DELETE":
+            response = requests.delete(url, timeout=10)
+        else:
+            st.error(f"Unsupported method: {method}")
+            return None
+        
+        if response.status_code >= 400:
+            st.error(f"API Error ({response.status_code}): {response.text}")
+            return None
+        
+        return response.json()
+    except requests.exceptions.ConnectionError:
+        st.error(f"Connection error: Could not connect to {url}. Is the backend running?")
+        # Fall back to mock data if API connection fails
+        if not USE_MOCK_DATA:
+            print("Falling back to mock data due to connection error")
+            return generate_mock_response(endpoint, method, data, params)
+        return None
+    except requests.exceptions.Timeout:
+        st.error(f"Timeout: Request to {url} timed out after 10 seconds")
+        return None
+    except Exception as e:
+        st.error(f"API Request Error: {type(e).__name__}: {e}")
+        return None
+
+def generate_mock_response(endpoint, method, data, params):
+    """Generate mock responses for development when API server is not running"""
+    import uuid
+    from datetime import datetime, timedelta
     
-    def update_task_embedding(self, task):
-        """Update embedding for a task that has changed"""
-        if not self.initialized:
-            return False
-        
-        with self.lock:
-            try:
-                # Remove old embedding from FAISS
-                if task.id in self.id_to_index:
-                    old_index = self.id_to_index[task.id]
-                    # FAISS doesn't support direct removal, so we'd rebuild the index
-                    # This is a simple version - in production, we'd use a more efficient approach
-                    # like maintaining a mask of active indices
-                    
-                # Generate new embedding
-                task.embedding = self.embedding_model.encode(task.description)
-                
-                # Update ChromaDB
-                self.task_collection.update(
-                    documents=[task.description],
-                    metadatas=[{
-                        "id": task.id,
-                        "priority": float(task.priority),
-                        "state": task.state,
-                        "entropy": float(task.entropy),
-                        "assignee": task.assignee or "unassigned",
-                        "tags": ",".join(task.tags) if task.tags else ""
-                    }],
-                    ids=[task.id]
-                )
-                
-                # For FAISS, we'll just add it again and keep track of the latest index
-                vector = np.array([task.embedding], dtype=np.float32)
-                self.faiss_index.add(vector)
-                
-                # Update index mappings
-                if task.id in self.id_to_index:
-                    old_index = self.id_to_index[task.id]
-                    del self.index_to_id[old_index]
-                
-                self.id_to_index[task.id] = self.next_index
-                self.index_to_id[self.next_index] = task.id
-                self.next_index += 1
-                
-                return True
-            except Exception as e:
-                print(f"⚠️ Error updating task embedding: {e}")
-                return False
+    # Root endpoint
+    if endpoint == "/":
+        return {
+            "name": "Neuromorphic Quantum-Cognitive Task System",
+            "status": "operational",
+            "version": "1.0.0",
+            "task_count": 4,
+            "embedding_engine": True,
+            "timestamp": datetime.now().isoformat()
+        }
     
-    def update_task_metadata(self, task):
-        """Update just the metadata for a task without changing the embedding"""
-        if not self.initialized:
-            return False
-        
-        with self.lock:
-            try:
-                # Update ChromaDB metadata
-                self.task_collection.update(
-                    metadatas=[{
-                        "id": task.id,
-                        "priority": float(task.priority),
-                        "state": task.state,
-                        "entropy": float(task.entropy),
-                        "assignee": task.assignee or "unassigned",
-                        "tags": ",".join(task.tags) if task.tags else ""
-                    }],
-                    ids=[task.id]
-                )
-                
-                return True
-            except Exception as e:
-                print(f"⚠️ Error updating task metadata: {e}")
-                return False
-    
-    def remove_task_embedding(self, task_id):
-        """Remove task embedding when a task is deleted"""
-        if not self.initialized:
-            return False
-        
-        with self.lock:
-            try:
-                # Remove from ChromaDB
-                self.task_collection.delete(ids=[task_id])
-                
-                # For FAISS, rebuilding the index would be needed for proper removal
-                # Here we just update our mappings and ignore the orphaned vector
-                if task_id in self.id_to_index:
-                    index = self.id_to_index[task_id]
-                    del self.id_to_index[task_id]
-                    if index in self.index_to_id:
-                        del self.index_to_id[index]
-                
-                return True
-            except Exception as e:
-                print(f"⚠️ Error removing task embedding: {e}")
-                return False
-    
-    def find_similar_tasks(self, task, threshold=0.7, max_results=5):
-        """Find tasks similar to the given task using vector similarity"""
-        if not self.initialized:
-            return []
-        
-        with self.lock:
-            try:
-                # If task doesn't have an embedding yet, create one
-                query_embedding = task.embedding
-                if query_embedding is None:
-                    query_embedding = self.embedding_model.encode(task.description)
-                
-                # Prepare query vector for FAISS
-                query_vector = np.array([query_embedding], dtype=np.float32)
-                
-                # Get the total number of vectors in the index
-                total_vectors = self.faiss_index.ntotal
-                
-                # If index is empty, return empty list
-                if total_vectors == 0:
-                    return []
-                
-                # Search for similar tasks with FAISS
-                k = min(max_results + 1, total_vectors)  # +1 to account for self match
-                distances, indices = self.faiss_index.search(query_vector, k)
-                
-                # Convert distances to similarity scores and map to task IDs
-                similar_task_ids = []
-                
-                for i, idx in enumerate(indices[0]):
-                    # Look up the task ID from the index
-                    if idx in self.index_to_id:
-                        task_id = self.index_to_id[idx]
-                        
-                        # Skip self
-                        if task_id == task.id:
-                            continue
-                        
-                        # Convert L2 distance to similarity score (1 = identical, 0 = completely different)
-                        # This is a simple conversion and can be improved
-                        similarity = 1.0 - min(1.0, distances[0][i] / (2 * self.embedding_dim))
-                        
-                        # Track similarity statistics for adaptive thresholding
-                        self.similarity_scores.append(similarity)
-                        if len(self.similarity_scores) > 100:
-                            self.similarity_scores = self.similarity_scores[-100:]
-                        
-                        if similarity >= threshold:
-                            similar_task_ids.append(task_id)
-                
-                return similar_task_ids
-            except Exception as e:
-                print(f"⚠️ Error finding similar tasks: {e}")
-                return []
-    
-    def calculate_similarity(self, task1, task2):
-        """Calculate similarity between two tasks"""
-        if not self.initialized:
-            # Enhanced fallback text matching with TF-IDF inspired weighting
-            def tokenize(text):
-                # Remove punctuation and convert to lowercase
-                words = ''.join(c.lower() for c in text if c.isalnum() or c.isspace()).split()
-                # Remove common words
-                stopwords = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'is', 'are'}
-                return [w for w in words if w not in stopwords]
-            
-            # Get weighted term frequencies
-            task1_words = tokenize(task1.description)
-            task2_words = tokenize(task2.description)
-            
-            if not task1_words or not task2_words:
-                return 0.0
-            
-            # Calculate word frequencies
-            word_freq1 = {}
-            word_freq2 = {}
-            for word in task1_words:
-                word_freq1[word] = word_freq1.get(word, 0) + 1
-            for word in task2_words:
-                word_freq2[word] = word_freq2.get(word, 0) + 1
-            
-            # Calculate similarity with term frequency weighting
-            common_words = set(word_freq1.keys()) & set(word_freq2.keys())
-            if not common_words:
-                return 0.0
-            
-            similarity = 0
-            for word in common_words:
-                similarity += min(word_freq1[word], word_freq2[word])
-            
-            # Normalize by total word count
-            max_words = max(len(task1_words), len(task2_words))
-            return similarity / max_words
-        
-        with self.lock:
-            try:
-                # Make sure both tasks have embeddings
-                if task1.embedding is None:
-                    task1.embedding = self.embedding_model.encode(task1.description)
-                
-                if task2.embedding is None:
-                    task2.embedding = self.embedding_model.encode(task2.description)
-                
-                # Calculate cosine similarity
-                dot_product = np.dot(task1.embedding, task2.embedding)
-                norm1 = np.linalg.norm(task1.embedding)
-                norm2 = np.linalg.norm(task2.embedding)
-                
-                if norm1 == 0 or norm2 == 0:
-                    return 0.0
-                
-                return dot_product / (norm1 * norm2)
-            except Exception as e:
-                print(f"⚠️ Error calculating similarity: {e}")
-                return 0.0
-    
-    def get_adaptive_threshold(self):
-        """Calculate adaptive threshold based on historical similarity scores"""
-        if not self.similarity_scores:
-            return 0.7  # Default threshold
-        
-        # Calculate percentile-based threshold
-        # Use the 33rd percentile to get a reasonable threshold
-        scores = np.array(self.similarity_scores)
-        threshold = max(0.65, np.percentile(scores, 33))
-        
-        # Record threshold history
-        self.threshold_history.append({
-            "timestamp": datetime.now().isoformat(),
-            "threshold": threshold,
-            "samples": len(scores)
-        })
-        
-        # Keep only last 20 threshold calculations
-        if len(self.threshold_history) > 20:
-            self.threshold_history = self.threshold_history[-20:]
-        
-        return threshold
-    
-    def contextual_search(self, query_text, filters=None, max_results=10):
-        """Search for tasks using natural language query with optional filters"""
-        if not self.initialized:
-            return []
-        
-        with self.lock:
-            try:
-                # Generate embedding for query
-                query_embedding = self.embedding_model.encode(query_text)
-                
-                # Search in ChromaDB, which supports metadata filtering
-                where_clause = {}
-                if filters:
-                    if filters.get('state'):
-                        where_clause["state"] = filters['state']
-                    if filters.get('assignee'):
-                        where_clause["assignee"] = filters['assignee']
-                    if filters.get('min_priority') is not None:
-                        where_clause["priority"] = {"$gte": filters['min_priority']}
-                
-                # Prepare query for ChromaDB
-                results = self.task_collection.query(
-                    query_embeddings=[query_embedding.tolist()],
-                    n_results=max_results,
-                    where=where_clause if where_clause else None
-                )
-                
-                # Process results
-                if results and results['ids'] and results['distances']:
-                    task_results = []
-                    
-                    for i, task_id in enumerate(results['ids'][0]):
-                        distance = results['distances'][0][i]
-                        # Convert distance to similarity (assuming normalized L2 distance)
-                        similarity = 1.0 - min(1.0, distance / 2.0)
-                        
-                        task_results.append({
-                            'task_id': task_id,
-                            'similarity': similarity,
-                            'metadata': results['metadatas'][0][i] if 'metadatas' in results else None
-                        })
-                    
-                    return task_results
-                
-                return []
-            except Exception as e:
-                print(f"⚠️ Error in contextual search: {e}")
-                return []
-    
-    def get_embedding_statistics(self):
-        """Get statistics about the embedding engine"""
-        if not self.initialized:
-            return {
-                "status": "not_initialized",
-                "fallback_method": "text_matching",
-                "reason": "Required libraries not available"
+    # Mock tasks list
+    if endpoint == "/tasks/" and method == "GET":
+        # Create some example tasks
+        mock_tasks = [
+            {
+                "id": "task1",
+                "description": "Implement quantum entanglement visualization for related tasks",
+                "priority": 0.8,
+                "deadline": (datetime.now() + timedelta(days=2)).isoformat(),
+                "assignee": "Alice",
+                "state": "PENDING",
+                "created_at": (datetime.now() - timedelta(days=5)).isoformat(),
+                "updated_at": (datetime.now() - timedelta(hours=8)).isoformat(),
+                "entangled_with": ["task2"],
+                "entropy": 0.75,
+                "tags": ["feature", "design", "urgent"],
+                "multiverse_paths": [
+                    "Use graph-based visualization with D3.js",
+                    "Implement 3D visualization with Three.js",
+                ]
+            },
+            {
+                "id": "task2",
+                "description": "Enhance neural embeddings with adaptive similarity thresholds",
+                "priority": 0.6,
+                "deadline": (datetime.now() + timedelta(days=7)).isoformat(),
+                "assignee": "Bob",
+                "state": "ENTANGLED",
+                "created_at": (datetime.now() - timedelta(days=10)).isoformat(),
+                "updated_at": (datetime.now() - timedelta(days=1)).isoformat(),
+                "entangled_with": ["task1", "task3"],
+                "entropy": 0.5,
+                "tags": ["enhancement", "research"],
+                "multiverse_paths": [
+                    "Implement adaptive threshold based on task distribution",
+                    "Use Bayesian optimization for threshold tuning"
+                ]
+            },
+            {
+                "id": "task3",
+                "description": "Fix entropy decay calculation bug in quantum core",
+                "priority": 0.9,
+                "deadline": (datetime.now() - timedelta(days=1)).isoformat(),
+                "assignee": "Charlie",
+                "state": "PENDING",
+                "created_at": (datetime.now() - timedelta(days=2)).isoformat(),
+                "updated_at": (datetime.now() - timedelta(hours=4)).isoformat(),
+                "entangled_with": ["task2"],
+                "entropy": 0.95,
+                "tags": ["bug", "urgent"],
+                "multiverse_paths": [
+                    "Recalibrate decay function parameters",
+                    "Rewrite decay algorithm using tensor operations"
+                ]
+            },
+            {
+                "id": "task4",
+                "description": "Document system architecture and quantum principles",
+                "priority": 0.4,
+                "deadline": (datetime.now() + timedelta(days=14)).isoformat(),
+                "assignee": "Diana",
+                "state": "RESOLVED",
+                "created_at": (datetime.now() - timedelta(days=20)).isoformat(),
+                "updated_at": (datetime.now() - timedelta(days=2)).isoformat(),
+                "entangled_with": [],
+                "entropy": 0.2,
+                "tags": ["documentation"],
+                "multiverse_paths": [
+                    "Create technical whitepaper",
+                    "Write user-friendly documentation"
+                ]
             }
+        ]
         
-        with self.lock:
-            return {
-                "status": "initialized",
-                "model": self.model_name,
-                "embedding_dimension": self.embedding_dim,
-                "indexed_tasks": self.faiss_index.ntotal,
-                "similarity_threshold": {
-                    "current": self.get_adaptive_threshold(),
-                    "history": self.threshold_history[-5:] if self.threshold_history else []
-                },
-                "similarity_distribution": {
-                    "mean": np.mean(self.similarity_scores) if self.similarity_scores else None,
-                    "median": np.median(self.similarity_scores) if self.similarity_scores else None,
-                    "min": min(self.similarity_scores) if self.similarity_scores else None,
-                    "max": max(self.similarity_scores) if self.similarity_scores else None,
-                    "samples": len(self.similarity_scores)
+        return {
+            "total": len(mock_tasks),
+            "offset": 0,
+            "limit": 100,
+            "tasks": mock_tasks
+        }
+    
+    # Create task
+    if endpoint == "/tasks/" and method == "POST":
+        task_data = data
+        new_task = {
+            "id": f"task_{uuid.uuid4().hex[:8]}",
+            "description": task_data.get("description", "New Task"),
+            "priority": task_data.get("priority", 0.5),
+            "deadline": task_data.get("deadline"),
+            "assignee": task_data.get("assignee"),
+            "state": "PENDING",
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+            "entangled_with": [],
+            "entropy": 1.0,
+            "tags": task_data.get("tags", []),
+            "multiverse_paths": ["Initial resolution path"]
+        }
+        
+        return {**new_task, "suggested_entanglements": []}
+        
+    # Get task by ID
+    if endpoint.startswith("/tasks/") and endpoint.count("/") == 2 and method == "GET":
+        task_id = endpoint.split("/")[-1]
+        
+        # Return a mock task for any ID
+        return {
+            "id": task_id,
+            "description": f"Example task {task_id}",
+            "priority": 0.7,
+            "deadline": (datetime.now() + timedelta(days=3)).isoformat(),
+            "assignee": "Alice",
+            "state": "PENDING",
+            "created_at": (datetime.now() - timedelta(days=1)).isoformat(),
+            "updated_at": datetime.now().isoformat(),
+            "entangled_with": [],
+            "entropy": 0.8,
+            "tags": ["example", "mock"],
+            "multiverse_paths": ["Path 1", "Path 2"]
+        }
+
+    # Get related tasks
+    if endpoint.endswith("/related") and method == "GET":
+        task_id = endpoint.split("/")[-2]
+        
+        return {
+            "source_task_id": task_id,
+            "threshold": params.get("threshold", 0.7),
+            "related_tasks": [
+                {
+                    "task": {
+                        "id": f"related_{uuid.uuid4().hex[:8]}",
+                        "description": "A related task with similar content",
+                        "priority": 0.6,
+                        "deadline": (datetime.now() + timedelta(days=5)).isoformat(),
+                        "assignee": "Bob",
+                        "state": "PENDING",
+                        "created_at": (datetime.now() - timedelta(days=3)).isoformat(),
+                        "updated_at": (datetime.now() - timedelta(hours=6)).isoformat(),
+                        "entangled_with": [],
+                        "entropy": 0.7,
+                        "tags": ["example", "related"],
+                        "multiverse_paths": ["Path A", "Path B"]
+                    },
+                    "similarity": 0.85
                 }
+            ]
+        }
+    
+    # Get entropy map
+    if endpoint == "/entropy":
+        return {
+            "total_entropy": 3.5,
+            "entropy_by_state": {
+                "PENDING": 2.2,
+                "ENTANGLED": 0.8,
+                "RESOLVED": 0.3,
+                "DEFERRED": 0.2,
+                "CANCELLED": 0.0
+            },
+            "task_entropies": {
+                "task1": 0.75,
+                "task2": 0.5,
+                "task3": 0.95,
+                "task4": 0.2
+            },
+            "overloaded_zones": [
+                {"assignee": "Charlie", "task_count": 3, "total_entropy": 2.1, "alert_level": "high"}
+            ],
+            "entropy_trend": [
+                {"timestamp": (datetime.now() - timedelta(days=7)).isoformat(), "total_entropy": 4.2},
+                {"timestamp": (datetime.now() - timedelta(days=6)).isoformat(), "total_entropy": 4.0},
+                {"timestamp": (datetime.now() - timedelta(days=5)).isoformat(), "total_entropy": 3.8},
+                {"timestamp": (datetime.now() - timedelta(days=4)).isoformat(), "total_entropy": 3.9},
+                {"timestamp": (datetime.now() - timedelta(days=3)).isoformat(), "total_entropy": 3.7},
+                {"timestamp": (datetime.now() - timedelta(days=2)).isoformat(), "total_entropy": 3.6},
+                {"timestamp": (datetime.now() - timedelta(days=1)).isoformat(), "total_entropy": 3.5},
+                {"timestamp": datetime.now().isoformat(), "total_entropy": 3.5}
+            ]
+        }
+    
+    # Get task entanglement network
+    if endpoint == "/network":
+        return {
+            "nodes": [
+                {"id": "task1", "label": "Task 1", "entropy": 0.75, "state": "PENDING"},
+                {"id": "task2", "label": "Task 2", "entropy": 0.5, "state": "ENTANGLED"},
+                {"id": "task3", "label": "Task 3", "entropy": 0.95, "state": "PENDING"},
+                {"id": "task4", "label": "Task 4", "entropy": 0.2, "state": "RESOLVED"}
+            ],
+            "links": [
+                {"source": "task1", "target": "task2", "similarity": 0.82, "type": "entangled"},
+                {"source": "task2", "target": "task3", "similarity": 0.68, "type": "entangled"},
+                {"source": "task1", "target": "task3", "similarity": 0.55, "type": "suggested"}
+            ]
+        }
+        
+    # Entanglement suggestions
+    if endpoint == "/suggestions/entanglements":
+        return {
+            "suggestions": [
+                {
+                    "task1": {
+                        "id": "task1",
+                        "description": "Implement quantum entanglement visualization"
+                    },
+                    "task2": {
+                        "id": "task5",
+                        "description": "Research visualization libraries for network graphs"
+                    },
+                    "similarity": 0.78,
+                    "reason": "Both tasks involve visualization technology"
+                },
+                {
+                    "task1": {
+                        "id": "task3",
+                        "description": "Fix entropy decay calculation bug"
+                    },
+                    "task2": {
+                        "id": "task6",
+                        "description": "Optimize performance of core quantum algorithms"
+                    },
+                    "similarity": 0.72,
+                    "reason": "Both involve quantum core optimizations"
+                }
+            ],
+            "threshold": params.get("threshold", 0.65),
+            "count": 2
+        }
+        
+    # Task optimization suggestions
+    if endpoint == "/suggestions/optimization":
+        return {
+            "suggestions": [
+                {
+                    "task_id": "task3",
+                    "task_description": "Fix entropy decay calculation bug in quantum core",
+                    "current_assignee": "Charlie",
+                    "suggested_assignee": "Alice",
+                    "reason": "Alice has lower workload and expertise in quantum algorithms"
+                },
+                {
+                    "task_id": "task7",
+                    "task_description": "Update embedding model to latest version",
+                    "current_assignee": "Charlie",
+                    "suggested_assignee": "Bob",
+                    "reason": "Bob has completed similar tasks successfully"
+                }
+            ],
+            "count": 2
+        }
+    
+    # Get task history
+    if endpoint.endswith("/history"):
+        task_id = endpoint.split("/")[-2]
+        
+        return {
+            "task_id": task_id,
+            "history": [
+                {
+                    "timestamp": (datetime.now() - timedelta(days=5)).isoformat(),
+                    "event_type": "CREATED",
+                    "details": {"description": f"Example task {task_id}", "priority": 0.5}
+                },
+                {
+                    "timestamp": (datetime.now() - timedelta(days=3)).isoformat(),
+                    "event_type": "UPDATED",
+                    "details": {"priority": 0.5, "priority": 0.7}
+                },
+                {
+                    "timestamp": (datetime.now() - timedelta(days=2)).isoformat(),
+                    "event_type": "STATE_CHANGED",
+                    "details": {"from": "PENDING", "to": "ENTANGLED"}
+                },
+                {
+                    "timestamp": (datetime.now() - timedelta(days=1)).isoformat(),
+                    "event_type": "ENTANGLEMENT_ADDED",
+                    "details": {"entangled_with": "task2"}
+                }
+            ]
+        }
+    
+    # System snapshot
+    if endpoint == "/system/snapshot":
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "task_count": 4,
+            "entropy_level": 3.5,
+            "embedding_engine_status": "operational",
+            "task_states": {
+                "PENDING": 2,
+                "ENTANGLED": 1,
+                "RESOLVED": 1,
+                "DEFERRED": 0, 
+                "CANCELLED": 0
             }
+        }
+        
+    # Create system backup
+    if endpoint == "/system/backup" and method == "POST":
+        return {
+            "status": "success",
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    # Embedding engine statistics - Updated with better mock response
+    if endpoint == "/system/embedding-stats":
+        return {
+            "status": "initialized",
+            "model": "all-MiniLM-L6-v2",
+            "embedding_dimension": 384,
+            "indexed_tasks": 4,
+            "similarity_threshold": {
+                "current": 0.72,
+                "history": [
+                    {"timestamp": (datetime.now() - timedelta(hours=5)).isoformat(), "threshold": 0.71, "samples": 10},
+                    {"timestamp": (datetime.now() - timedelta(hours=3)).isoformat(), "threshold": 0.72, "samples": 15},
+                    {"timestamp": datetime.now().isoformat(), "threshold": 0.72, "samples": 20}
+                ]
+            },
+            "similarity_distribution": {
+                "mean": 0.68,
+                "median": 0.70,
+                "min": 0.45,
+                "max": 0.92,
+                "samples": 20
+            }
+        }
+
+    # Default response for unhandled endpoints
+    return {
+        "status": "mock_response",
+        "endpoint": endpoint,
+        "method": method,
+        "message": "This is a mock response as API server is not running"
+    }
+
+@st.cache_data(ttl=10, max_entries=100)
+def get_all_tasks(state=None, assignee=None, search=None, priority_min=None, priority_max=None, 
+                  tags=None, sort_by="updated_at", sort_order="desc"):
+    """Get all tasks with filtering - cached for improved performance"""
+    params = {
+        "sort_by": sort_by,
+        "sort_order": sort_order,
+        "limit": 100
+    }
+    
+    if state:
+        params["state"] = state
+    
+    if assignee:
+        params["assignee"] = assignee
+    
+    if search:
+        params["search"] = search
+    
+    if priority_min is not None:
+        params["priority_min"] = priority_min
+    
+    if priority_max is not None:
+        params["priority_max"] = priority_max
+    
+    if tags:
+        params["tags"] = tags
+    
+    # Add cache key using refresh trigger to allow invalidation    
+    refresh_key = st.session_state.refresh_trigger
+    
+    return api_request("/tasks/", params=params)
+
+@st.cache_data(ttl=10, max_entries=100)
+def get_task(task_id):
+    """Get a single task by ID - cached for improved performance"""
+    # Add cache key using refresh trigger to allow invalidation
+    refresh_key = st.session_state.refresh_trigger
+    
+    return api_request(f"/tasks/{task_id}")
+
+def create_task(task_data):
+    """Create a new task"""
+    return api_request("/tasks/", method="POST", data=task_data)
+
+def update_task(task_id, task_data):
+    """Update an existing task"""
+    return api_request(f"/tasks/{task_id}", method="PUT", data=task_data)
+
+def update_task_state(task_id, new_state):
+    """Update a task's state"""
+    return api_request(f"/tasks/{task_id}/state/{new_state}", method="PUT")
+
+def delete_task(task_id):
+    """Delete a task"""
+    return api_request(f"/tasks/{task_id}", method="DELETE")
+
+def get_related_tasks(task_id, threshold=0.7, max_results=5):
+    """Get tasks related to the given task"""
+    params = {
+        "threshold": threshold,
+        "max_results": max_results
+    }
+    return api_request(f"/tasks/{task_id}/related", params=params)
+
+def entangle_tasks(task_id1, task_id2):
+    """Create bidirectional entanglement between two tasks"""
+    return api_request(f"/tasks/{task_id1}/entangle/{task_id2}", method="POST")
+
+def break_entanglement(task_id1, task_id2):
+    """Break bidirectional entanglement between two tasks"""
+    return api_request(f"/tasks/{task_id1}/break-entanglement/{task_id2}", method="POST")
+
+@st.cache_data(ttl=10, max_entries=10)
+def get_entropy_map():
+    """Get the current entropy distribution - cached for performance"""
+    # Add cache key using refresh trigger to allow invalidation
+    refresh_key = st.session_state.refresh_trigger
+    return api_request("/entropy")
+
+@st.cache_data(ttl=10, max_entries=10)
+def get_entanglement_network():
+    """Get the task entanglement network - cached for performance"""
+    # Add cache key using refresh trigger to allow invalidation
+    refresh_key = st.session_state.refresh_trigger
+    return api_request("/network")
+
+@st.cache_data(ttl=10, max_entries=10)
+def suggest_entanglements(threshold=0.65):
+    """Get suggestions for task entanglements - cached for performance"""
+    params = {"threshold": threshold}
+    # Add cache key using refresh trigger to allow invalidation
+    refresh_key = st.session_state.refresh_trigger
+    return api_request("/suggestions/entanglements", params=params)
+
+@st.cache_data(ttl=10, max_entries=10)
+def suggest_optimization():
+    """Get suggestions for task optimization - cached for performance"""
+    # Add cache key using refresh trigger to allow invalidation
+    refresh_key = st.session_state.refresh_trigger
+    return api_request("/suggestions/optimization")
+
+def collapse_task_superposition(task_id):
+    """Collapse a task's superposition"""
+    return api_request(f"/tasks/{task_id}/collapse", method="POST")
+
+def get_task_history(task_id):
+    """Get a task's history"""
+    return api_request(f"/tasks/{task_id}/history")
+
+@st.cache_data(ttl=30, max_entries=5)
+def get_system_snapshot():
+    """Get a snapshot of the system state - cached for performance"""
+    # Add cache key using refresh trigger to allow invalidation
+    refresh_key = st.session_state.refresh_trigger
+    return api_request("/system/snapshot")
+
+def create_system_backup():
+    """Create a system backup"""
+    return api_request("/system/backup", method="POST")
+
+@st.cache_data(ttl=30, max_entries=5)
+def get_embedding_statistics():
+    """Get statistics about the embedding engine - cached for performance"""
+    # Add cache key using refresh trigger to allow invalidation
+    refresh_key = st.session_state.refresh_trigger
+    
+    # Try direct access if available
+    if not USE_MOCK_DATA and direct_embedding_available:
+        try:
+            return embedding_engine.get_embedding_statistics()
+        except Exception as e:
+            print(f"Error getting direct embedding statistics: {e}")
+    
+    # Fall back to API request
+    return api_request("/system/embedding-stats")
+
+# UI Components
+
+@st.cache_data(ttl=10)
+def get_system_info():
+    """Get basic system information for the header - cached for performance"""
+    # Add cache key using refresh trigger to allow invalidation
+    refresh_key = st.session_state.refresh_trigger
+    return api_request("/")
+
+def render_header():
+    """Render the application header"""
+    col1, col2 = st.columns([1, 5])
+    
+    with col1:
+        st.image("https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/1f9e0.svg", width=80)
+    
+    with col2:
+        st.title("Neuromorphic Quantum-Cognitive Task System")
+    
+    # System status (using cached function)
+    system_info = get_system_info()
+    if system_info:
+        status_cols = st.columns(5)  # Added a column for API mode
+        
+        with status_cols[0]:
+            st.metric("System Status", "Operational" if system_info.get("status") == "operational" else "Error")
+        
+        with status_cols[1]:
+            st.metric("Task Count", system_info.get("task_count", 0))
+        
+        with status_cols[2]:
+            embedding_status = "Active" if system_info.get("embedding_engine", False) else "Inactive"
+            st.metric("Embedding Engine", embedding_status)
+        
+        with status_cols[3]:
+            st.metric("Version", system_info.get("version", "Unknown"))
+            
+        with status_cols[4]:
+            api_mode = "Mock" if USE_MOCK_DATA else "Live"
+            st.metric("API Mode", api_mode)
+
+def render_sidebar():
+    """Render the sidebar navigation"""
+    st.sidebar.title("Navigation")
+    
+    # Navigation buttons
+    if st.sidebar.button("📊 Dashboard", use_container_width=True):
+        navigate_to('dashboard')
+    
+    if st.sidebar.button("📝 Task Management", use_container_width=True):
+        navigate_to('tasks')
+    
+    if st.sidebar.button("🔄 Task Relationships", use_container_width=True):
+        navigate_to('relationships')
+    
+    if st.sidebar.button("📈 Entropy Analytics", use_container_width=True):
+        navigate_to('entropy')
+    
+    if st.sidebar.button("💡 Suggestions", use_container_width=True):
+        navigate_to('suggestions')
+    
+    if st.sidebar.button("⚙️ System", use_container_width=True):
+        navigate_to('system')
+    
+    # Create new task button (always visible)
+    st.sidebar.divider()
+    if st.sidebar.button("➕ New Task", type="primary", use_container_width=True):
+        navigate_to('new_task')
+    
+    # Settings / utilities
+    st.sidebar.divider()
+    st.sidebar.caption("Settings")
+    dark_mode = st.sidebar.toggle("Dark Mode", value=st.session_state.dark_mode)
+    if dark_mode != st.session_state.dark_mode:
+        st.session_state.dark_mode = dark_mode
+        st.rerun()
+    
+    # Add Mock/Live toggle
+    use_mock = st.sidebar.toggle("Use Mock Data", value=USE_MOCK_DATA)
+    if use_mock != USE_MOCK_DATA:
+        # This requires modifying the global variable
+        global USE_MOCK_DATA
+        USE_MOCK_DATA = use_mock
+        trigger_refresh()
+    
+    # Add refresh button
+    if st.sidebar.button("🔄 Refresh Data", use_container_width=True):
+        trigger_refresh()
