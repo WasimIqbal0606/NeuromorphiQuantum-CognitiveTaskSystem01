@@ -783,15 +783,15 @@ def render_sidebar():
         st.session_state.dark_mode = dark_mode
         st.rerun()
     
-    # Add Mock/Live toggle
-global USE_MOCK_DATA  # Declare global before using or assigning
-use_mock = st.sidebar.toggle("Use Mock Data", value=USE_MOCK_DATA)
-if use_mock != USE_MOCK_DATA:
-    USE_MOCK_DATA = use_mock
+    # Initialize session state variable
+if "USE_MOCK_DATA" not in st.session_state:
+    st.session_state.USE_MOCK_DATA = False
+
+# Toggle to switch between mock and live
+use_mock = st.sidebar.toggle("Use Mock Data", value=st.session_state.USE_MOCK_DATA)
+if use_mock != st.session_state.USE_MOCK_DATA:
+    st.session_state.USE_MOCK_DATA = use_mock
     trigger_refresh()
 
-# Add refresh button
-if st.sidebar.button("🔄 Refresh Data", use_container_width=True):
-    trigger_refresh()
 
 
